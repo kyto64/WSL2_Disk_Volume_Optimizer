@@ -19,8 +19,8 @@ The WSL2 Disk Volume Optimizer is a PowerShell-based automation tool designed to
 
 ```cmd
 # Clone the repository
-git clone https://github.com/kyto64/wsl2-disk-volume-resolver.git
-cd wsl2-disk-volume-resolver
+git clone https://github.com/kyto64/WSL2_Disk_Volume_Optimizer.git
+cd WSL2_Disk_Volume_Optimizer
 
 # Run the optimizer (requires admin privileges)
 WSL2-DiskOptimizer.bat
@@ -66,7 +66,7 @@ This tool provides:
 
 ### File Structure
 ```
-wsl2-disk-volume-resolver/
+WSL2_Disk_Volume_Optimizer/
 ├── Optimize-WSL2Disk.ps1      # Core VHD optimization PowerShell script
 ├── WSL2-DiskOptimizer.bat     # Interactive batch wrapper for easy execution
 ├── README.md                  # English documentation (this file)
