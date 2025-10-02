@@ -19,8 +19,8 @@ WSL2 ディスク容量最適化ツールは、Windows Subsystem for Linux 2 (WS
 
 ```cmd
 # リポジトリをクローン
-git clone https://github.com/kyto64/wsl2-disk-volume-resolver.git
-cd wsl2-disk-volume-resolver
+git clone https://github.com/kyto64/WSL2_Disk_Volume_Optimizer.git
+cd WSL2_Disk_Volume_Optimizer
 
 # 最適化ツールを実行（管理者権限が必要）
 WSL2-DiskOptimizer.bat
@@ -66,7 +66,7 @@ WSL2環境では以下の問題が発生することがあります：
 
 ### ファイル構成
 ```
-wsl2-disk-volume-resolver/
+WSL2_Disk_Volume_Optimizer/
 ├── Optimize-WSL2Disk.ps1      # メインのVHD最適化PowerShellスクリプト
 ├── WSL2-DiskOptimizer.bat     # 対話型バッチラッパー（簡単実行用）
 ├── README.md                  # 英語版ドキュメント
