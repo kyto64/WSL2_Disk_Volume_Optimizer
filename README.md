@@ -5,243 +5,228 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey.svg)](https://www.microsoft.com/en-us/windows)
 [![WSL2](https://img.shields.io/badge/WSL2-Compatible-green.svg)](https://docs.microsoft.com/en-us/windows/wsl/)
 
-## Overview
+Safely compact WSL2 and Docker Desktop VHDX files to reclaim disk space on Windows.
 
-The WSL2 Disk Volume Optimizer is a PowerShell-based automation tool designed to resolve disk space issues in Windows Subsystem for Linux 2 (WSL2) environments. This tool automatically detects and compresses WSL2's `ext4.vhdx` files to reclaim disk space on the host Windows system.
+## The Problem
+
+WSL2 stores each Linux distribution in an `ext4.vhdx` virtual disk. That file can grow large over time, especially when using package caches, build artifacts, Docker images, and containers.
+
+Deleting files inside WSL2 does not always return the space to Windows. The Linux filesystem may have free blocks, but the host-side `ext4.vhdx` can remain large until it is compacted. Manual compaction with `diskpart` is possible, but the sequence is easy to get wrong and can damage a distribution if the VHDX is still in use.
+
+## What This Tool Does
+
+WSL2 Disk Volume Optimizer automates the safer path:
+
+- Detects `ext4.vhdx` files in common WSL2 and Docker Desktop locations.
+- Runs `wsl --shutdown` before touching VHDX files so they are not mounted.
+- Compacts each VHDX with `Optimize-VHD` when available, then falls back to `diskpart`.
+- Reports before/after file sizes so you can confirm how much host disk space was reclaimed.
 
 ## Quick Start
 
-**TL;DR**: Quickly free up WSL2 disk space in 3 steps:
+**TL;DR**: free up WSL2 disk space in 3 steps:
 
-1. **Download** the latest release or clone this repository
-2. **Run as Administrator**: Execute `WSL2-DiskOptimizer.bat`
-3. **Wait**: The tool will automatically optimize your WSL2 disk volumes
+1. Download the latest release or clone this repository.
+2. Open Command Prompt or PowerShell as Administrator.
+3. Run `WSL2-DiskOptimizer.bat`.
 
 ```cmd
-# Clone the repository
 git clone https://github.com/kyto64/WSL2_Disk_Volume_Optimizer.git
 cd WSL2_Disk_Volume_Optimizer
-
-# Run the optimizer (requires admin privileges)
 WSL2-DiskOptimizer.bat
 ```
 
-> ⚠️ **Important**: Always backup your WSL environments before running this tool!
+> Important: export or otherwise back up important WSL distributions before compacting VHDX files.
 
-## Problem Statement
+## Requirements
 
-WSL2 environments often experience disk space issues where:
-- The `ext4.vhdx` virtual disk file grows over time but does not shrink when files are deleted within WSL
-- Manual `diskpart` operations are time-consuming and error-prone
-- Docker containers and images consume significant disk space within WSL
-- System administrators require an automated solution for disk space management
-
-## Solution Features
-
-This tool provides:
-- Automated detection of WSL2 VHD files across standard installation paths
-- Intelligent compression using either `Optimize-VHD` cmdlet or `diskpart` as fallback
-- Comprehensive error handling and logging
-- Multiple execution methods for different operational requirements
-
-## Technical Specifications
-
-### System Requirements
 - Windows 10/11 with WSL2 enabled
-- PowerShell 5.1 or higher
+- PowerShell 5.1 or later
 - Administrator privileges
-- Standard Windows `diskpart` utility
+- Windows `diskpart` utility
+- Optional: Hyper-V PowerShell module for `Optimize-VHD`
 
-### Supported Environments
-- All WSL2 distributions
-- Docker Desktop for Windows with WSL2 backend
-- Corporate and personal Windows environments
+## Usage
 
-## Installation and Deployment
+### Interactive Batch Wrapper
 
-### Prerequisites
-1. Ensure WSL2 is properly installed and configured
-2. Verify PowerShell execution policy allows script execution
-3. Obtain administrator privileges for the target system
+Use this for normal manual runs:
 
-### File Structure
-```
-WSL2_Disk_Volume_Optimizer/
-├── Optimize-WSL2Disk.ps1      # Core VHD optimization PowerShell script
-├── WSL2-DiskOptimizer.bat     # Interactive batch wrapper for easy execution
-├── README.md                  # English documentation (this file)
-├── README-JP.md               # Japanese documentation (日本語版)
-└── LICENSE                    # MIT License terms
+```cmd
+WSL2-DiskOptimizer.bat
 ```
 
-#### File Descriptions
+The wrapper checks administrator privileges, verifies that `Optimize-WSL2Disk.ps1` is present, and then starts the PowerShell script.
 
-- **`Optimize-WSL2Disk.ps1`**: The main PowerShell script that performs the actual VHD compression. Contains all the core logic for detecting WSL2 VHD files, shutting down WSL services, and executing compression operations.
+### Direct PowerShell Execution
 
-- **`WSL2-DiskOptimizer.bat`**: A user-friendly batch file wrapper that provides an interactive interface. Handles administrator privilege checks and provides clear feedback during execution.
+Use this when integrating with your own scripts:
 
-- **`README.md`**: Comprehensive English documentation covering installation, usage, troubleshooting, and best practices.
-
-- **`README-JP.md`**: Complete Japanese translation of the documentation for Japanese-speaking users.
-
-- **`LICENSE`**: MIT License file specifying the terms of use and distribution.
-
-## Operational Procedures
-
-### Method 1: Interactive Execution (Recommended for Production)
-
-1. Open Command Prompt with administrator privileges
-2. Navigate to the tool directory
-3. Execute the interactive batch file:
-   ```cmd
-   WSL2-DiskOptimizer.bat
-   ```
-4. Execute VHD compression
-
-### Method 2: Direct PowerShell Execution
-
-For integration with existing automation frameworks:
 ```powershell
-# VHD compression
 .\Optimize-WSL2Disk.ps1
+```
 
-# Suppress confirmation prompts
+To skip the confirmation prompt:
+
+```powershell
 .\Optimize-WSL2Disk.ps1 -Force
 ```
 
-### Sample Output
+## Measuring Results
 
-A typical execution will produce output similar to:
+The amount of recovered space depends on your workload, deleted files, Docker usage, filesystem state, and Windows storage behavior. Instead of relying on a fixed benchmark, measure your own environment before and after a run.
 
+Check VHDX file sizes from Windows:
+
+```powershell
+Get-ChildItem "$env:LOCALAPPDATA\Packages\*\LocalState\ext4.vhdx" -Recurse -ErrorAction SilentlyContinue |
+    Select-Object FullName, @{Name="SizeGB";Expression={[Math]::Round($_.Length / 1GB, 2)}}
+
+Get-ChildItem "$env:LOCALAPPDATA\Docker" -Recurse -Filter "ext4.vhdx" -ErrorAction SilentlyContinue |
+    Select-Object FullName, @{Name="SizeGB";Expression={[Math]::Round($_.Length / 1GB, 2)}}
 ```
-[2024-10-01 14:30:00] [INFO] WSL2 Disk Volume Optimizer started
-[2024-10-01 14:30:00] [INFO] Administrator privileges confirmed
-[2024-10-01 14:30:01] [INFO] Shutting down WSL...
-[2024-10-01 14:30:03] [SUCCESS] WSL shutdown completed
-[2024-10-01 14:30:03] [INFO] Searching for VHD files...
-[2024-10-01 14:30:04] [INFO] Found VHD: C:\Users\username\AppData\Local\Packages\CanonicalGroupLimited.Ubuntu_79rhkp1fndgsc\LocalState\ext4.vhdx
-[2024-10-01 14:30:04] [INFO] Original size: 45.2 GB
-[2024-10-01 14:30:04] [INFO] Compressing VHD...
-[2024-10-01 14:32:15] [SUCCESS] Compression completed
-[2024-10-01 14:32:15] [INFO] New size: 12.8 GB
-[2024-10-01 14:32:15] [SUCCESS] Space recovered: 32.4 GB (71.7% reduction)
-[2024-10-01 14:32:15] [SUCCESS] Optimization completed successfully
+
+Check filesystem usage from inside WSL:
+
+```bash
+wsl -d Ubuntu -- df -h /
 ```
+
+Record the execution environment with your result:
+
+| Item | Example |
+|------|---------|
+| Windows version | Windows 11 23H2 |
+| WSL2 distribution | Ubuntu 22.04 |
+| Docker Desktop | Installed / Not installed |
+| Before VHDX size | Your measured value |
+| After VHDX size | Your measured value |
+| Recovered space | Calculated from your measured values |
+
+## Example Logs
+
+### Successful Run
+
+The exact sizes and paths depend on your machine.
+
+```text
+[2026-05-31 14:30:00] [INFO] Starting WSL2 Disk Volume Optimizer
+[2026-05-31 14:30:00] [INFO] Checking WSL status...
+[2026-05-31 14:30:01] [INFO] Shutting down WSL...
+[2026-05-31 14:30:04] [SUCCESS] WSL shutdown completed
+[2026-05-31 14:30:04] [INFO] Searching for WSL VHD files...
+[2026-05-31 14:30:05] [INFO] Found VHD files:
+[2026-05-31 14:30:05] [INFO]   - C:\Users\user\AppData\Local\Packages\CanonicalGroupLimited.Ubuntu_...\LocalState\ext4.vhdx (Size: <before> GB, Last Modified: ...)
+[2026-05-31 14:30:05] [INFO] Optimizing VHD file: C:\Users\user\AppData\Local\Packages\...\ext4.vhdx
+[2026-05-31 14:30:05] [WARN] Optimize-VHD is not available: ...
+[2026-05-31 14:30:05] [INFO] Compressing VHD using diskpart: C:\Users\user\AppData\Local\Packages\...\ext4.vhdx
+[2026-05-31 14:35:20] [SUCCESS] VHD compression completed using diskpart
+[2026-05-31 14:35:20] [SUCCESS] Optimization completed: C:\Users\user\AppData\Local\Packages\...\ext4.vhdx
+[2026-05-31 14:35:20] [INFO]   Before: <before> GB
+[2026-05-31 14:35:20] [INFO]   After: <after> GB
+[2026-05-31 14:35:20] [SUCCESS]   Space saved: <saved> GB
+[2026-05-31 14:35:20] [INFO] Optimization process completed
+[2026-05-31 14:35:20] [INFO] Success: 1 / 1 files
+[2026-05-31 14:35:20] [SUCCESS] Please restart WSL to verify the results
+```
+
+### Administrator Privileges Missing
+
+```text
+[ERROR] This script requires administrator privileges.
+
+Please follow these steps:
+1. Open Command Prompt or PowerShell as "Run as administrator"
+2. Navigate to this folder
+3. Run this batch file
+```
+
+### No VHDX Files Found
+
+```text
+[2026-05-31 14:30:00] [INFO] Starting WSL2 Disk Volume Optimizer
+[2026-05-31 14:30:01] [SUCCESS] WSL shutdown completed
+[2026-05-31 14:30:01] [INFO] Searching for WSL VHD files...
+[2026-05-31 14:30:02] [ERROR] No VHD files found
+```
+
+## Safety
+
+VHDX compaction is a disk operation. Read [docs/SAFETY.md](docs/SAFETY.md) before using this tool on an important distribution.
+
+### Why Administrator Privileges Are Required
+
+The script uses Windows disk-management operations (`Optimize-VHD` or `diskpart`) against VHDX files. These operations require elevated permissions because they attach, inspect, and compact virtual disks.
+
+### Why WSL Is Shut Down
+
+The script runs `wsl --shutdown` before compaction so that distributions and Docker Desktop WSL backends release their VHDX file locks. Compacting a mounted or active VHDX is unsafe.
+
+### Backup Recommendation
+
+Export important distributions before running the optimizer:
+
+```powershell
+wsl --export Ubuntu D:\Backups\Ubuntu-before-vhdx-compact.tar
+```
+
+For Docker Desktop data, use Docker's own backup/export process for important images, volumes, and containers.
 
 ## Process Flow
 
-### Phase 1: Preparation
-1. Administrator privilege verification
-2. WSL status assessment
-3. Required file existence validation
-4. User confirmation (unless `-Force` parameter specified)
+1. Verify administrator privileges.
+2. Check WSL availability.
+3. Ask for confirmation unless `-Force` is used.
+4. Run `wsl --shutdown`.
+5. Search common locations for `ext4.vhdx`.
+6. Compact each VHDX with `Optimize-VHD` or `diskpart`.
+7. Report before/after sizes and success counts.
 
-### Phase 2: WSL Management
-1. Graceful shutdown of all WSL distributions
-2. Process termination verification
-3. File system lock release confirmation
+## Known Limitations
 
-### Phase 3: VHD Optimization
-1. Automatic detection of `ext4.vhdx` files in standard locations:
-   - `%LOCALAPPDATA%\Packages`
-   - `%LOCALAPPDATA%\Docker`
-2. Compression attempt using `Optimize-VHD` cmdlet
-3. Fallback to `diskpart` if `Optimize-VHD` unavailable
-4. Size comparison and space recovery calculation
+- WSL1 distributions are not supported.
+- The current search logic targets common paths under `%LOCALAPPDATA%\Packages` and `%LOCALAPPDATA%\Docker`.
+- Custom VHDX locations created with `wsl --import` may not be detected.
+- Docker Desktop VHDX paths can vary by Docker Desktop version.
+- Network-drive based WSL installations are not supported.
+- The tool does not currently provide dry-run mode, JSON output, or per-path selection.
+- Compaction can take minutes to hours depending on VHDX size and disk speed.
 
-### Phase 4: Verification and Reporting
-1. Process completion status
-2. Space recovery metrics
-3. Operation success/failure summary
-4. Recommendations for verification
+## Troubleshooting
 
-## Expected Outcomes
+| Issue | Likely Cause | Resolution |
+|-------|--------------|------------|
+| `Optimize-VHD is not available` | Hyper-V module is unavailable | Expected behavior; the script falls back to `diskpart` |
+| `This script must be run with administrator privileges` | The shell is not elevated | Reopen Command Prompt or PowerShell as Administrator |
+| `No VHD files found` | VHDX files are in a non-standard location | Track [docs/ROADMAP.md](docs/ROADMAP.md) for custom path support |
+| WSL distribution does not start after compaction | VHDX corruption or interrupted disk operation | Restore from a `wsl --export` backup |
 
-### Performance Improvements
-- Disk space recovery: Typically 20-80% of original VHD size
-- I/O performance enhancement due to reduced file fragmentation
-- Faster WSL startup times
-- Improved system responsiveness
+Diagnostic commands:
 
-### Quantifiable Results
-Example before/after comparison:
-```
-Before optimization:
-Filesystem      Size  Used Avail Use% Mounted on
-/dev/sdb        250G  180G   57G  76% /
-
-After optimization:
-Filesystem      Size  Used Avail Use% Mounted on
-/dev/sdb        250G   45G  193G  19% /
-```
-
-## Risk Assessment and Mitigation
-
-### Critical Warnings
-- **Data Loss Risk**: Improper execution may result in WSL environment corruption
-- **System Availability**: WSL services will be temporarily unavailable during optimization
-- **Recovery Requirement**: Complete WSL environment backup is mandatory before execution
-
-### Mitigation Strategies
-1. **Mandatory Backup**: Execute WSL export before optimization
-2. **Testing Protocol**: Validate in non-production environment first
-3. **Rollback Plan**: Maintain verified backup and recovery procedures
-4. **Monitoring**: Verify WSL functionality post-optimization
-
-## Troubleshooting Guide
-
-### Common Issues and Resolutions
-
-| Issue | Cause | Resolution |
-|-------|-------|------------|
-| "Optimize-VHD not found" | Windows edition limitation | Expected behavior; tool uses diskpart automatically |
-| "Administrator privileges required" | Insufficient permissions | Execute as administrator |
-| "WSL distribution not starting" | Optimization failure | Restore from backup |
-
-### Diagnostic Commands
 ```powershell
-# Verify WSL status
 wsl --list --verbose
-
-# Check disk usage
-wsl -d <distribution> -- df -h
-
-# Validate file integrity
-wsl -d <distribution> -- fsck /dev/sdb
+wsl -d <distribution> -- df -h /
 ```
 
-## Maintenance and Support
+## Documentation
 
-### Regular Operations
-- Schedule periodic execution (monthly recommended)
-- Monitor disk space trends
-- Maintain current backups
-- Review execution logs for anomalies
+- [Safety Guide](docs/SAFETY.md)
+- [Roadmap](docs/ROADMAP.md)
+- [Japanese README](README-JP.md)
+- [Contributing Guide](CONTRIBUTING.md)
+- [Security Policy](SECURITY.md)
 
-### Version Control
-This tool is maintained under Git version control with semantic versioning.
+## Support
 
-### Support Channels
-- GitHub Issues for bug reports
-- Pull Requests for contributions
-- Documentation updates via repository
+- Open GitHub Issues for bug reports and feature requests.
+- Pull Requests are welcome for documentation, tests, and safer automation.
+- Include Windows version, WSL distro, Docker Desktop status, command used, and relevant logs when reporting a problem.
 
-## Compliance and Licensing
+## License
 
-This software is distributed under the MIT License, providing:
-- Commercial use permission
-- Modification rights
-- Distribution authorization
-- Private use allowance
+This project is distributed under the MIT License. See [LICENSE](LICENSE).
 
-### Disclaimer
-This tool is provided "as-is" without warranties. Users assume full responsibility for:
-- Data backup and recovery
-- Testing in appropriate environments
-- Compliance with organizational policies
-- Risk assessment and mitigation
-
-## References and Documentation
+## References
 
 - [Microsoft WSL Documentation](https://docs.microsoft.com/en-us/windows/wsl/)
 - [PowerShell Documentation](https://docs.microsoft.com/en-us/powershell/)
@@ -249,4 +234,4 @@ This tool is provided "as-is" without warranties. Users assume full responsibili
 
 ---
 
-**IMPORTANT**: Ensure complete WSL environment backup before executing this tool in production environments.
+**Important**: Back up important WSL distributions before compacting VHDX files.
