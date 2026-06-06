@@ -93,6 +93,12 @@ WSL の停止と VHDX 圧縮前に Docker cleanup を実行する場合:
 .\Optimize-WSL2Disk.ps1 -DockerPrune -DockerPruneDistro Ubuntu
 ```
 
+自動検出で見つからない VHDX ファイルまたはディレクトリを含める場合:
+
+```powershell
+.\Optimize-WSL2Disk.ps1 -VHDPath "C:\Users\user\AppData\Local\wsl\{guid}\ext4.vhdx"
+```
+
 ## 実行結果の測定方法
 
 回収できる容量は、作業内容、削除済みファイル、Docker の利用状況、ファイルシステムの状態、Windows 側のストレージ挙動によって変わります。固定の Before / After 数値ではなく、自分の環境で実測してください。
@@ -104,6 +110,9 @@ Get-ChildItem "$env:LOCALAPPDATA\Packages\*\LocalState\ext4.vhdx" -Recurse -Erro
     Select-Object FullName, @{Name="SizeGB";Expression={[Math]::Round($_.Length / 1GB, 2)}}
 
 Get-ChildItem "$env:LOCALAPPDATA\Docker" -Recurse -Filter "ext4.vhdx" -ErrorAction SilentlyContinue |
+    Select-Object FullName, @{Name="SizeGB";Expression={[Math]::Round($_.Length / 1GB, 2)}}
+
+Get-ChildItem "$env:LOCALAPPDATA\wsl" -Recurse -Filter "ext4.vhdx" -ErrorAction SilentlyContinue |
     Select-Object FullName, @{Name="SizeGB";Expression={[Math]::Round($_.Length / 1GB, 2)}}
 ```
 
@@ -200,18 +209,18 @@ Docker Desktop の重要なイメージ、ボリューム、コンテナは Dock
 3. `-Force` が指定されていない場合は確認プロンプトを表示します。
 4. 任意で WSL 内の `docker system prune --force` を実行します。
 5. `wsl --shutdown` を実行します。
-6. 標準的な場所から `ext4.vhdx` を検索します。
+6. 登録済み WSL ディストリビューションと標準的な場所から `ext4.vhdx` を検索します。
 7. `Optimize-VHD` または `diskpart` で VHDX を圧縮します。
 8. 実行前後のサイズと成功件数を表示します。
 
 ## 既知の制限
 
 - WSL1 ディストリビューションは対象外です。
-- 現在の検索対象は `%LOCALAPPDATA%\Packages` と `%LOCALAPPDATA%\Docker` 配下の一般的なパスです。
-- `wsl --import` などで作成したカスタム VHDX の場所は検出できない場合があります。
+- 検索対象は登録済み WSL2 ディストリビューション、`%LOCALAPPDATA%\wsl`、`%LOCALAPPDATA%\Packages`、`%LOCALAPPDATA%\Docker` です。
+- カスタム VHDX の場所は `-VHDPath` で明示的に含められます。
 - Docker Desktop のバージョンによって VHDX の場所が異なる場合があります。
 - ネットワークドライブ上の WSL インストールは対象外です。
-- dry-run mode、JSON 出力、個別パス指定は未対応です。
+- dry-run mode、JSON 出力、対話的な個別パス選択は未対応です。
 - VHDX のサイズやディスク速度によって、圧縮に数分から数時間かかる場合があります。
 
 ## トラブルシューティング
@@ -221,7 +230,7 @@ Docker Desktop の重要なイメージ、ボリューム、コンテナは Dock
 | `Optimize-VHD is not available` | Hyper-V モジュールが利用できない | 想定内です。スクリプトは `diskpart` にフォールバックします |
 | `This script must be run with administrator privileges` | 管理者権限で実行されていない | コマンドプロンプトまたは PowerShell を管理者として開き直します |
 | `Docker system prune failed` | 選択した WSL ディストリビューションで Docker を利用できない | Docker を起動するか、Docker CLI が使える WSL ディストリビューションを選択します |
-| `No VHD files found` | VHDX が標準以外の場所にある | カスタムパス対応は [docs/ROADMAP.md](docs/ROADMAP.md) を参照してください |
+| `No VHD files found` | VHDX が登録されていない、または特殊な場所にある | ログに表示された検索対象を確認し、必要に応じて `-VHDPath <path-to-ext4.vhdx>` を指定します |
 | WSL ディストリビューションが起動しない | VHDX 破損または中断されたディスク操作 | `wsl --export` で取得したバックアップから復元します |
 
 診断コマンド:

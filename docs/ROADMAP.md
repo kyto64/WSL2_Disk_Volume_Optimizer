@@ -24,6 +24,10 @@ Add Pester tests for path detection, administrator checks, fallback selection, a
 
 Improve support for Docker Desktop path variations across versions and installation layouts. The tool should clearly report which Docker Desktop VHDX files were detected and which were skipped.
 
+### Interactive VHDX Selection
+
+Add interactive per-path selection so users can choose which detected VHDX files to compact during a manual run.
+
 ### Package Manager Support
 
 Evaluate distribution through `winget` and Scoop after the release artifacts and installation flow are stable.
@@ -38,13 +42,15 @@ Investigate Authenticode signing for release scripts and batch files so users ca
 
 A small GUI or terminal UI could make safety checks and result reporting clearer for users who are not comfortable with PowerShell.
 
-### Custom VHDX Path Support
-
-Add an explicit `-Path` option for imported distributions or custom VHDX locations that are not under the default `%LOCALAPPDATA%` paths.
-
 ### JSON Output
 
 Add structured output for automation, including detected files, before/after sizes, selected compaction method, and per-file status.
+
+## Completed
+
+### Custom VHDX Path Support
+
+Added registered WSL distribution detection and an explicit `-VHDPath` option for custom VHDX locations that are not under the default `%LOCALAPPDATA%` paths.
 
 ### Release Checklist
 

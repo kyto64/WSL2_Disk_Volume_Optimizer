@@ -93,6 +93,12 @@ To run Docker cleanup in a specific WSL distribution:
 .\Optimize-WSL2Disk.ps1 -DockerPrune -DockerPruneDistro Ubuntu
 ```
 
+To include a VHDX file or directory that automatic detection misses:
+
+```powershell
+.\Optimize-WSL2Disk.ps1 -VHDPath "C:\Users\user\AppData\Local\wsl\{guid}\ext4.vhdx"
+```
+
 ## Measuring Results
 
 The amount of recovered space depends on your workload, deleted files, Docker usage, filesystem state, and Windows storage behavior. Instead of relying on a fixed benchmark, measure your own environment before and after a run.
@@ -104,6 +110,9 @@ Get-ChildItem "$env:LOCALAPPDATA\Packages\*\LocalState\ext4.vhdx" -Recurse -Erro
     Select-Object FullName, @{Name="SizeGB";Expression={[Math]::Round($_.Length / 1GB, 2)}}
 
 Get-ChildItem "$env:LOCALAPPDATA\Docker" -Recurse -Filter "ext4.vhdx" -ErrorAction SilentlyContinue |
+    Select-Object FullName, @{Name="SizeGB";Expression={[Math]::Round($_.Length / 1GB, 2)}}
+
+Get-ChildItem "$env:LOCALAPPDATA\wsl" -Recurse -Filter "ext4.vhdx" -ErrorAction SilentlyContinue |
     Select-Object FullName, @{Name="SizeGB";Expression={[Math]::Round($_.Length / 1GB, 2)}}
 ```
 
@@ -200,18 +209,18 @@ For Docker Desktop data, use Docker's own backup/export process for important im
 3. Ask for confirmation unless `-Force` is used.
 4. Optionally run `docker system prune --force` inside WSL.
 5. Run `wsl --shutdown`.
-6. Search common locations for `ext4.vhdx`.
+6. Search registered WSL distributions and common locations for `ext4.vhdx`.
 7. Compact each VHDX with `Optimize-VHD` or `diskpart`.
 8. Report before/after sizes and success counts.
 
 ## Known Limitations
 
 - WSL1 distributions are not supported.
-- The current search logic targets common paths under `%LOCALAPPDATA%\Packages` and `%LOCALAPPDATA%\Docker`.
-- Custom VHDX locations created with `wsl --import` may not be detected.
+- The search logic checks registered WSL2 distributions, `%LOCALAPPDATA%\wsl`, `%LOCALAPPDATA%\Packages`, and `%LOCALAPPDATA%\Docker`.
+- Custom VHDX locations can be included with `-VHDPath`.
 - Docker Desktop VHDX paths can vary by Docker Desktop version.
 - Network-drive based WSL installations are not supported.
-- The tool does not currently provide dry-run mode, JSON output, or per-path selection.
+- The tool does not currently provide dry-run mode, JSON output, or interactive per-path selection.
 - Compaction can take minutes to hours depending on VHDX size and disk speed.
 
 ## Troubleshooting
@@ -221,7 +230,7 @@ For Docker Desktop data, use Docker's own backup/export process for important im
 | `Optimize-VHD is not available` | Hyper-V module is unavailable | Expected behavior; the script falls back to `diskpart` |
 | `This script must be run with administrator privileges` | The shell is not elevated | Reopen Command Prompt or PowerShell as Administrator |
 | `Docker system prune failed` | Docker is unavailable in the selected WSL distribution | Start Docker or select the WSL distribution where Docker CLI works |
-| `No VHD files found` | VHDX files are in a non-standard location | Track [docs/ROADMAP.md](docs/ROADMAP.md) for custom path support |
+| `No VHD files found` | VHDX files are not registered or are in an unusual location | Check the searched locations in the log and rerun with `-VHDPath <path-to-ext4.vhdx>` |
 | WSL distribution does not start after compaction | VHDX corruption or interrupted disk operation | Restore from a `wsl --export` backup |
 
 Diagnostic commands:

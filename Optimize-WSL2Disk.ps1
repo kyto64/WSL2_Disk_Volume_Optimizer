@@ -17,6 +17,9 @@
 .PARAMETER DockerPruneDistro
     Optional WSL distribution name used for Docker prune. Uses the default distribution when omitted.
 
+.PARAMETER VHDPath
+    Optional VHDX file path or directory path to include when automatic detection misses a distribution.
+
 .EXAMPLE
     .\Optimize-WSL2Disk.ps1
 
@@ -29,6 +32,9 @@
 .EXAMPLE
     .\Optimize-WSL2Disk.ps1 -DockerPrune -DockerPruneDistro Ubuntu
 
+.EXAMPLE
+    .\Optimize-WSL2Disk.ps1 -VHDPath "C:\Users\user\AppData\Local\wsl\{guid}\ext4.vhdx"
+
 .NOTES
     This script must be run with administrator privileges.
     It is strongly recommended to backup your WSL environment before execution.
@@ -37,7 +43,8 @@
 param(
     [switch]$Force,
     [switch]$DockerPrune,
-    [string]$DockerPruneDistro
+    [string]$DockerPruneDistro,
+    [string[]]$VHDPath
 )
 
 # Error handling
@@ -107,30 +114,145 @@ function Invoke-WSLDockerSystemPrune {
     }
 }
 
+# Search locations are kept for diagnostics when no VHDX files are found.
+$script:LastVHDSearchLocations = @()
+
 # Search for VHD files
 function Find-WSLVHDFiles {
-    $vhdFiles = @()
+    param([string[]]$ExplicitPaths)
+
+    $vhdFiles = New-Object System.Collections.ArrayList
+    $seenPaths = @{}
+    $script:LastVHDSearchLocations = @()
+
+    function Add-SearchLocation {
+        param([string]$Path, [string]$Source)
+
+        if (-not [string]::IsNullOrWhiteSpace($Path)) {
+            $script:LastVHDSearchLocations += "$Source - $Path"
+        }
+    }
+
+    function Add-VHDFile {
+        param(
+            [string]$Path,
+            [string]$Source,
+            [string]$DistributionName = ""
+        )
+
+        try {
+            $item = Get-Item -LiteralPath $Path -ErrorAction Stop
+            if ($item.PSIsContainer) {
+                return
+            }
+
+            if ($item.Extension -ne ".vhdx") {
+                Write-Log "Skipping non-VHDX file: $Path" "WARN"
+                return
+            }
+
+            $key = $item.FullName.ToLowerInvariant()
+            if ($seenPaths.ContainsKey($key)) {
+                return
+            }
+
+            $seenPaths[$key] = $true
+            [void]$vhdFiles.Add([PSCustomObject]@{
+                Path = $item.FullName
+                SizeGB = [Math]::Round($item.Length / 1GB, 2)
+                LastModified = $item.LastWriteTime
+                Directory = $item.Directory.Name
+                Source = $Source
+                Distribution = $DistributionName
+            })
+        }
+        catch {
+            Write-Log "Unable to inspect VHDX candidate: $Path ($($_.Exception.Message))" "WARN"
+        }
+    }
+
+    function Add-VHDFilesFromDirectory {
+        param([string]$Path, [string]$Source)
+
+        if (Test-Path -LiteralPath $Path) {
+            Add-SearchLocation -Path $Path -Source $Source
+            Write-Log "Searching for VHD files: $Path"
+            $files = Get-ChildItem -LiteralPath $Path -Recurse -Filter "ext4.vhdx" -ErrorAction SilentlyContinue
+            foreach ($file in $files) {
+                Add-VHDFile -Path $file.FullName -Source $Source
+            }
+        }
+    }
+
+    if ($ExplicitPaths) {
+        foreach ($explicitPath in $ExplicitPaths) {
+            Add-SearchLocation -Path $explicitPath -Source "Explicit path"
+            if (-not (Test-Path -LiteralPath $explicitPath)) {
+                Write-Log "Explicit VHD path does not exist: $explicitPath" "WARN"
+                continue
+            }
+
+            $explicitItem = Get-Item -LiteralPath $explicitPath -ErrorAction SilentlyContinue
+            if ($null -eq $explicitItem) {
+                continue
+            }
+
+            if ($explicitItem.PSIsContainer) {
+                Write-Log "Searching for VHD files in explicit directory: $explicitPath"
+                $files = Get-ChildItem -LiteralPath $explicitPath -Recurse -Filter "ext4.vhdx" -ErrorAction SilentlyContinue
+                foreach ($file in $files) {
+                    Add-VHDFile -Path $file.FullName -Source "Explicit path"
+                }
+            }
+            else {
+                Add-VHDFile -Path $explicitItem.FullName -Source "Explicit path"
+            }
+        }
+    }
+
+    $lxssRoot = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss"
+    if (Test-Path $lxssRoot) {
+        Add-SearchLocation -Path $lxssRoot -Source "WSL registry"
+        Write-Log "Searching registered WSL distributions from registry..."
+        $distributions = Get-ChildItem -Path $lxssRoot -ErrorAction SilentlyContinue
+        foreach ($distribution in $distributions) {
+            try {
+                $properties = Get-ItemProperty -Path $distribution.PSPath -ErrorAction Stop
+                if ([string]::IsNullOrWhiteSpace($properties.BasePath)) {
+                    continue
+                }
+
+                $vhdFileName = $properties.VhdFileName
+                if ([string]::IsNullOrWhiteSpace($vhdFileName)) {
+                    $vhdFileName = "ext4.vhdx"
+                }
+
+                if ([System.IO.Path]::IsPathRooted($vhdFileName)) {
+                    $registeredVhdPath = $vhdFileName
+                }
+                else {
+                    $registeredVhdPath = Join-Path -Path $properties.BasePath -ChildPath $vhdFileName
+                }
+
+                Add-VHDFile -Path $registeredVhdPath -Source "WSL registry" -DistributionName $properties.DistributionName
+            }
+            catch {
+                Write-Log "Failed to inspect WSL registry entry $($distribution.PSChildName): $($_.Exception.Message)" "WARN"
+            }
+        }
+    }
+
     $searchPaths = @(
+        "$env:LOCALAPPDATA\wsl",
         "$env:LOCALAPPDATA\Packages",
         "$env:LOCALAPPDATA\Docker"
     )
 
     foreach ($searchPath in $searchPaths) {
-        if (Test-Path $searchPath) {
-            Write-Log "Searching for VHD files: $searchPath"
-            $files = Get-ChildItem -Path $searchPath -Recurse -Filter "ext4.vhdx" -ErrorAction SilentlyContinue
-            foreach ($file in $files) {
-                $vhdFiles += [PSCustomObject]@{
-                    Path = $file.FullName
-                    SizeGB = [Math]::Round($file.Length / 1GB, 2)
-                    LastModified = $file.LastWriteTime
-                    Directory = $file.Directory.Name
-                }
-            }
-        }
+        Add-VHDFilesFromDirectory -Path $searchPath -Source "Standard path"
     }
 
-    return $vhdFiles
+    return @($vhdFiles)
 }
 
 # VHD optimization using Optimize-VHD
@@ -249,16 +371,28 @@ function Main {
 
     # Search for VHD files
     Write-Log "Searching for WSL VHD files..."
-    $vhdFiles = Find-WSLVHDFiles
+    $vhdFiles = Find-WSLVHDFiles -ExplicitPaths $VHDPath
 
     if ($vhdFiles.Count -eq 0) {
         Write-Log "No VHD files found" "ERROR"
+        if ($script:LastVHDSearchLocations.Count -gt 0) {
+            Write-Log "Searched locations:"
+            $script:LastVHDSearchLocations | ForEach-Object {
+                Write-Log "  - $_"
+            }
+        }
+        Write-Log "Run 'wsl --list --verbose' to confirm installed WSL2 distributions."
+        Write-Log "If your VHDX is stored in a custom location, rerun with -VHDPath <path-to-ext4.vhdx>."
         exit 1
     }
 
     Write-Log "Found VHD files:"
     $vhdFiles | ForEach-Object {
-        Write-Log "  - $($_.Path) (Size: $($_.SizeGB) GB, Last Modified: $($_.LastModified))"
+        $distributionText = ""
+        if (-not [string]::IsNullOrWhiteSpace($_.Distribution)) {
+            $distributionText = ", Distribution: $($_.Distribution)"
+        }
+        Write-Log "  - $($_.Path) (Size: $($_.SizeGB) GB, Last Modified: $($_.LastModified), Source: $($_.Source)$distributionText)"
     }
 
     # Optimize each VHD file
