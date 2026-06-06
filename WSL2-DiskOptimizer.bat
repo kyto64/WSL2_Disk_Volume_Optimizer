@@ -38,12 +38,37 @@ if not exist "Optimize-WSL2Disk.ps1" (
 )
 
 echo.
-echo Running WSL2 VHD compression...
+echo Optional Docker cleanup before WSL shutdown:
+echo 1. Skip Docker system prune
+echo 2. Run docker system prune in the default WSL distribution
+echo 3. Run docker system prune in a named WSL distribution
 echo.
-powershell -ExecutionPolicy Bypass -File "Optimize-WSL2Disk.ps1"
+choice /c 123 /n /m "Select an option [1-3]: "
+set "DOCKER_PRUNE_OPTION=%errorLevel%"
+if "%DOCKER_PRUNE_OPTION%"=="3" (
+    echo.
+    set /p "DOCKER_PRUNE_DISTRO=Enter WSL distribution name: "
+    if "!DOCKER_PRUNE_DISTRO: =!"=="" (
+        echo [ERROR] WSL distribution name is required.
+        pause
+        exit /b 1
+    )
+)
 
 echo.
-if %errorLevel% equ 0 (
+echo Running WSL2 VHD compression...
+echo.
+if "%DOCKER_PRUNE_OPTION%"=="3" (
+    powershell -ExecutionPolicy Bypass -File "Optimize-WSL2Disk.ps1" -DockerPrune -DockerPruneDistro "!DOCKER_PRUNE_DISTRO!"
+) else if "%DOCKER_PRUNE_OPTION%"=="2" (
+    powershell -ExecutionPolicy Bypass -File "Optimize-WSL2Disk.ps1" -DockerPrune
+) else (
+    powershell -ExecutionPolicy Bypass -File "Optimize-WSL2Disk.ps1"
+)
+set "PROCESS_EXIT_CODE=%errorLevel%"
+
+echo.
+if %PROCESS_EXIT_CODE% equ 0 (
     echo ========================================
     echo Process completed successfully!
     echo ========================================
@@ -61,4 +86,4 @@ if %errorLevel% equ 0 (
 echo.
 pause
 
-exit /b %errorLevel%
+exit /b %PROCESS_EXIT_CODE%

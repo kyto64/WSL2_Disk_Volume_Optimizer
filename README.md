@@ -18,6 +18,7 @@ Deleting files inside WSL2 does not always return the space to Windows. The Linu
 WSL2 Disk Volume Optimizer automates the safer path:
 
 - Detects `ext4.vhdx` files in common WSL2 and Docker Desktop locations.
+- Optionally runs `docker system prune --force` inside WSL before compaction.
 - Runs `wsl --shutdown` before touching VHDX files so they are not mounted.
 - Compacts each VHDX with `Optimize-VHD` when available, then falls back to `diskpart`.
 - Reports before/after file sizes so you can confirm how much host disk space was reclaimed.
@@ -56,7 +57,15 @@ Use this for normal manual runs:
 WSL2-DiskOptimizer.bat
 ```
 
-The wrapper checks administrator privileges, verifies that `Optimize-WSL2Disk.ps1` is present, and then starts the PowerShell script.
+The wrapper checks administrator privileges, verifies that `Optimize-WSL2Disk.ps1` is present, asks whether to run Docker cleanup, and then starts the PowerShell script.
+
+The Docker cleanup menu can:
+
+- skip Docker cleanup
+- run `docker system prune --force` in the default WSL distribution
+- run `docker system prune --force` in a named WSL distribution
+
+This standard Docker prune does not remove volumes and does not remove all unused tagged images.
 
 ### Direct PowerShell Execution
 
@@ -70,6 +79,18 @@ To skip the confirmation prompt:
 
 ```powershell
 .\Optimize-WSL2Disk.ps1 -Force
+```
+
+To run Docker cleanup before WSL shutdown and VHDX compaction:
+
+```powershell
+.\Optimize-WSL2Disk.ps1 -DockerPrune
+```
+
+To run Docker cleanup in a specific WSL distribution:
+
+```powershell
+.\Optimize-WSL2Disk.ps1 -DockerPrune -DockerPruneDistro Ubuntu
 ```
 
 ## Measuring Results
@@ -177,10 +198,11 @@ For Docker Desktop data, use Docker's own backup/export process for important im
 1. Verify administrator privileges.
 2. Check WSL availability.
 3. Ask for confirmation unless `-Force` is used.
-4. Run `wsl --shutdown`.
-5. Search common locations for `ext4.vhdx`.
-6. Compact each VHDX with `Optimize-VHD` or `diskpart`.
-7. Report before/after sizes and success counts.
+4. Optionally run `docker system prune --force` inside WSL.
+5. Run `wsl --shutdown`.
+6. Search common locations for `ext4.vhdx`.
+7. Compact each VHDX with `Optimize-VHD` or `diskpart`.
+8. Report before/after sizes and success counts.
 
 ## Known Limitations
 
@@ -198,6 +220,7 @@ For Docker Desktop data, use Docker's own backup/export process for important im
 |-------|--------------|------------|
 | `Optimize-VHD is not available` | Hyper-V module is unavailable | Expected behavior; the script falls back to `diskpart` |
 | `This script must be run with administrator privileges` | The shell is not elevated | Reopen Command Prompt or PowerShell as Administrator |
+| `Docker system prune failed` | Docker is unavailable in the selected WSL distribution | Start Docker or select the WSL distribution where Docker CLI works |
 | `No VHD files found` | VHDX files are in a non-standard location | Track [docs/ROADMAP.md](docs/ROADMAP.md) for custom path support |
 | WSL distribution does not start after compaction | VHDX corruption or interrupted disk operation | Restore from a `wsl --export` backup |
 

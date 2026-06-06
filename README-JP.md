@@ -18,6 +18,7 @@ WSL2 内でファイルを削除しても、Windows 側の `ext4.vhdx` のサイ
 WSL2 ディスク容量最適化ツールは、より安全な圧縮手順を自動化します。
 
 - 標準的な WSL2 / Docker Desktop の場所から `ext4.vhdx` を検出します。
+- 任意で、圧縮前に WSL 内で `docker system prune --force` を実行します。
 - VHDX に触れる前に `wsl --shutdown` を実行し、マウント状態を解除します。
 - 利用可能な場合は `Optimize-VHD`、利用できない場合は `diskpart` で VHDX を圧縮します。
 - 実行前後のファイルサイズを表示し、Windows 側で回収できた容量を確認できるようにします。
@@ -56,7 +57,15 @@ WSL2-DiskOptimizer.bat
 WSL2-DiskOptimizer.bat
 ```
 
-このラッパーは管理者権限を確認し、`Optimize-WSL2Disk.ps1` が存在することを確認してから PowerShell スクリプトを起動します。
+このラッパーは管理者権限を確認し、`Optimize-WSL2Disk.ps1` が存在することを確認し、Docker cleanup の有無を確認してから PowerShell スクリプトを起動します。
+
+Docker cleanup メニューでは以下を選べます。
+
+- Docker cleanup をスキップ
+- 既定の WSL ディストリビューションで `docker system prune --force` を実行
+- 指定した WSL ディストリビューションで `docker system prune --force` を実行
+
+この標準の Docker prune では、ボリュームや未使用のタグ付きイメージ全体は削除されません。
 
 ### PowerShell から直接実行
 
@@ -70,6 +79,18 @@ WSL2-DiskOptimizer.bat
 
 ```powershell
 .\Optimize-WSL2Disk.ps1 -Force
+```
+
+WSL の停止と VHDX 圧縮前に Docker cleanup を実行する場合:
+
+```powershell
+.\Optimize-WSL2Disk.ps1 -DockerPrune
+```
+
+特定の WSL ディストリビューションで Docker cleanup を実行する場合:
+
+```powershell
+.\Optimize-WSL2Disk.ps1 -DockerPrune -DockerPruneDistro Ubuntu
 ```
 
 ## 実行結果の測定方法
@@ -177,10 +198,11 @@ Docker Desktop の重要なイメージ、ボリューム、コンテナは Dock
 1. 管理者権限を確認します。
 2. WSL が利用可能か確認します。
 3. `-Force` が指定されていない場合は確認プロンプトを表示します。
-4. `wsl --shutdown` を実行します。
-5. 標準的な場所から `ext4.vhdx` を検索します。
-6. `Optimize-VHD` または `diskpart` で VHDX を圧縮します。
-7. 実行前後のサイズと成功件数を表示します。
+4. 任意で WSL 内の `docker system prune --force` を実行します。
+5. `wsl --shutdown` を実行します。
+6. 標準的な場所から `ext4.vhdx` を検索します。
+7. `Optimize-VHD` または `diskpart` で VHDX を圧縮します。
+8. 実行前後のサイズと成功件数を表示します。
 
 ## 既知の制限
 
@@ -198,6 +220,7 @@ Docker Desktop の重要なイメージ、ボリューム、コンテナは Dock
 |------|----------|------|
 | `Optimize-VHD is not available` | Hyper-V モジュールが利用できない | 想定内です。スクリプトは `diskpart` にフォールバックします |
 | `This script must be run with administrator privileges` | 管理者権限で実行されていない | コマンドプロンプトまたは PowerShell を管理者として開き直します |
+| `Docker system prune failed` | 選択した WSL ディストリビューションで Docker を利用できない | Docker を起動するか、Docker CLI が使える WSL ディストリビューションを選択します |
 | `No VHD files found` | VHDX が標準以外の場所にある | カスタムパス対応は [docs/ROADMAP.md](docs/ROADMAP.md) を参照してください |
 | WSL ディストリビューションが起動しない | VHDX 破損または中断されたディスク操作 | `wsl --export` で取得したバックアップから復元します |
 

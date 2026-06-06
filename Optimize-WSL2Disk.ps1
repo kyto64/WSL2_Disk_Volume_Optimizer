@@ -11,11 +11,23 @@
 .PARAMETER Force
     Skip confirmation prompts and execute
 
+.PARAMETER DockerPrune
+    Run docker system prune --force inside WSL before shutting down WSL and compacting VHD files
+
+.PARAMETER DockerPruneDistro
+    Optional WSL distribution name used for Docker prune. Uses the default distribution when omitted.
+
 .EXAMPLE
     .\Optimize-WSL2Disk.ps1
 
 .EXAMPLE
     .\Optimize-WSL2Disk.ps1 -Force
+
+.EXAMPLE
+    .\Optimize-WSL2Disk.ps1 -DockerPrune
+
+.EXAMPLE
+    .\Optimize-WSL2Disk.ps1 -DockerPrune -DockerPruneDistro Ubuntu
 
 .NOTES
     This script must be run with administrator privileges.
@@ -23,7 +35,9 @@
 #>
 
 param(
-    [switch]$Force
+    [switch]$Force,
+    [switch]$DockerPrune,
+    [string]$DockerPruneDistro
 )
 
 # Error handling
@@ -61,6 +75,35 @@ function Get-WSLDistributions {
     catch {
         Write-Log "Failed to get WSL list: $($_.Exception.Message)" "ERROR"
         return $null
+    }
+}
+
+# Run Docker cleanup inside WSL before VHD compaction
+function Invoke-WSLDockerSystemPrune {
+    param([string]$Distro)
+
+    try {
+        $wslArgs = @()
+        if ([string]::IsNullOrWhiteSpace($Distro)) {
+            Write-Log "Running Docker system prune in the default WSL distribution..."
+            $wslArgs = @("--", "docker", "system", "prune", "--force")
+        }
+        else {
+            Write-Log "Running Docker system prune in WSL distribution: $Distro"
+            $wslArgs = @("-d", $Distro, "--", "docker", "system", "prune", "--force")
+        }
+
+        & wsl @wslArgs
+        if ($LASTEXITCODE -ne 0) {
+            throw "docker system prune failed. Exit code: $LASTEXITCODE"
+        }
+
+        Write-Log "Docker system prune completed" "SUCCESS"
+        return $true
+    }
+    catch {
+        Write-Log "Docker system prune failed: $($_.Exception.Message)" "ERROR"
+        return $false
     }
 }
 
@@ -183,6 +226,13 @@ function Main {
     if ($null -eq $wslDistributions) {
         Write-Log "Failed to check WSL status" "ERROR"
         exit 1
+    }
+
+    # Optional Docker cleanup before WSL shutdown
+    if ($DockerPrune) {
+        if (-not (Invoke-WSLDockerSystemPrune -Distro $DockerPruneDistro)) {
+            exit 1
+        }
     }
 
     # Shutdown WSL
