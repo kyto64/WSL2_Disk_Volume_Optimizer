@@ -73,6 +73,30 @@ wsl --export Ubuntu D:\Backups\Ubuntu-before-vhdx-compact.tar
 
 Use the correct distribution name and install path for your environment. `wsl --unregister` deletes the existing distribution, so only run it after confirming that your backup is valid.
 
+### Docker Desktop Backup Considerations
+
+Before compacting Docker Desktop VHDX files:
+
+- Quit Docker Desktop completely so WSL-backed Docker disks are not in use.
+- Export or otherwise back up important images, containers, and volumes. Example image backup:
+
+  ```powershell
+  docker save my-image:tag -o D:\Backups\my-image.tar
+  ```
+
+- If you moved Docker Desktop storage through Settings → Resources → Disk image location, confirm the custom path in `%APPDATA%\Docker\settings.json` (`customWslDistroDir`) is included in the detection summary or pass it explicitly with `-VHDPath`.
+- Review the Docker Desktop detection summary in the script output before proceeding. It reports which Docker-related VHDX files were detected, which expected paths were missing, and which layouts were skipped because they are not used on your system.
+- Use `-WhatIf` first when you want to confirm Docker detection without shutting down WSL or compacting anything.
+
+Common Docker Desktop WSL2 backend paths checked by the tool include:
+
+- `%LOCALAPPDATA%\Docker\wsl\data\ext4.vhdx`
+- `%LOCALAPPDATA%\Docker\wsl\distro\ext4.vhdx`
+- `%LOCALAPPDATA%\Docker\wsl\main\ext4.vhdx`
+- `%LOCALAPPDATA%\Docker\wsl\disk\ext4.vhdx`
+- `%LOCALAPPDATA%\Docker\wsl\disk\docker_data.vhdx`
+- Custom roots such as `%LOCALAPPDATA%\Docker\wsl\DockerDesktopWSL` or `customWslDistroDir`
+
 ### If Docker Desktop Data Is Affected
 
 Docker Desktop stores data in WSL-backed virtual disks when using the WSL2 backend. If Docker Desktop no longer starts after compaction:

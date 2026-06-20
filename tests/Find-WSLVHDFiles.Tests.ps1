@@ -9,6 +9,7 @@ BeforeAll {
 Describe 'Find-WSLVHDFiles path detection' {
     BeforeEach {
         $script:LastVHDSearchLocations = @()
+        $script:LastDockerSearchResults = @()
     }
 
     Context 'Standard WSL paths' {
@@ -22,7 +23,7 @@ Describe 'Find-WSLVHDFiles path detection' {
                 $packagesRoot = New-MockDirectoryItem -FullName $packagesRoot
             }
 
-            $results = Find-WSLVHDFiles -SearchPaths @($packagesRoot) -SkipRegistrySearch
+            $results = Find-WSLVHDFiles -SearchPaths @($packagesRoot) -SkipRegistrySearch -SkipDockerSearch
 
             $results.Count | Should -Be 1
             $results[0].Path | Should -Be $packageVhdx
@@ -40,7 +41,7 @@ Describe 'Find-WSLVHDFiles path detection' {
                 $wslRoot = New-MockDirectoryItem -FullName $wslRoot
             }
 
-            $results = Find-WSLVHDFiles -SearchPaths @($wslRoot) -SkipRegistrySearch
+            $results = Find-WSLVHDFiles -SearchPaths @($wslRoot) -SkipRegistrySearch -SkipDockerSearch
 
             $results.Count | Should -Be 1
             $results[0].Path | Should -Be $wslVhdx
@@ -49,22 +50,115 @@ Describe 'Find-WSLVHDFiles path detection' {
     }
 
     Context 'Docker Desktop paths' {
-        It 'Detects ext4.vhdx under the Docker Desktop data directory' {
-            $dockerRoot = 'C:\MockAppData\Local\Docker'
-            $dockerVhdx = Join-Path $dockerRoot 'wsl\data\ext4.vhdx'
+        It 'Detects ext4.vhdx from a known Docker Desktop layout target' {
+            $dockerVhdx = 'C:\MockAppData\Local\Docker\wsl\disk\ext4.vhdx'
+            $dockerTarget = [PSCustomObject]@{
+                Path = $dockerVhdx
+                Label = 'Docker Desktop unified disk image'
+                Layout = 'disk\ext4.vhdx'
+                IsCustomRoot = $false
+            }
 
             Register-MockFileSystem -Files @{
                 $dockerVhdx = New-MockVhdxItem -FullName $dockerVhdx -Length 3221225472
             } -Directories @{
-                $dockerRoot = New-MockDirectoryItem -FullName $dockerRoot
+                'C:\MockAppData\Local\Docker\wsl\disk' = New-MockDirectoryItem -FullName 'C:\MockAppData\Local\Docker\wsl\disk'
+                'C:\MockAppData\Local\Docker\wsl' = New-MockDirectoryItem -FullName 'C:\MockAppData\Local\Docker\wsl'
             }
 
-            $results = Find-WSLVHDFiles -SearchPaths @($dockerRoot) -SkipRegistrySearch
+            $results = Find-WSLVHDFiles -SkipRegistrySearch -SearchPaths @() -DockerSearchTargets @($dockerTarget) -LocalAppDataRoot 'C:\MockAppData\Local'
 
             $results.Count | Should -Be 1
             $results[0].Path | Should -Be $dockerVhdx
-            $results[0].Source | Should -Be 'Standard path'
+            $results[0].Source | Should -Be 'Docker Desktop'
+            $results[0].DockerLabel | Should -Be 'Docker Desktop unified disk image'
             $results[0].SizeGB | Should -Be 3
+            ($script:LastDockerSearchResults | Where-Object { $_.Status -eq 'Detected' }).Count | Should -Be 1
+        }
+
+        It 'Detects legacy docker_data.vhdx from Docker Desktop targets' {
+            $dockerDataVhdx = 'C:\MockAppData\Local\Docker\wsl\disk\docker_data.vhdx'
+            $dockerTarget = [PSCustomObject]@{
+                Path = $dockerDataVhdx
+                Label = 'Legacy Docker data disk'
+                Layout = 'disk\docker_data.vhdx'
+                IsCustomRoot = $false
+            }
+
+            Register-MockFileSystem -Files @{
+                $dockerDataVhdx = New-MockVhdxItem -FullName $dockerDataVhdx -Length 5368709120
+            } -Directories @{
+                'C:\MockAppData\Local\Docker\wsl\disk' = New-MockDirectoryItem -FullName 'C:\MockAppData\Local\Docker\wsl\disk'
+                'C:\MockAppData\Local\Docker\wsl' = New-MockDirectoryItem -FullName 'C:\MockAppData\Local\Docker\wsl'
+            }
+
+            $results = Find-WSLVHDFiles -SkipRegistrySearch -SearchPaths @() -DockerSearchTargets @($dockerTarget) -LocalAppDataRoot 'C:\MockAppData\Local'
+
+            $results.Count | Should -Be 1
+            $results[0].Path | Should -Be $dockerDataVhdx
+            $results[0].Source | Should -Be 'Docker Desktop'
+        }
+
+        It 'Records missing Docker layout paths when the parent directory exists' {
+            $missingDockerVhdx = 'C:\MockAppData\Local\Docker\wsl\main\ext4.vhdx'
+            $dockerTarget = [PSCustomObject]@{
+                Path = $missingDockerVhdx
+                Label = 'Docker Desktop engine VM'
+                Layout = 'main\ext4.vhdx'
+                IsCustomRoot = $false
+            }
+
+            Register-MockFileSystem -Directories @{
+                'C:\MockAppData\Local\Docker\wsl\main' = New-MockDirectoryItem -FullName 'C:\MockAppData\Local\Docker\wsl\main'
+                'C:\MockAppData\Local\Docker\wsl' = New-MockDirectoryItem -FullName 'C:\MockAppData\Local\Docker\wsl'
+            }
+
+            $results = Find-WSLVHDFiles -SkipRegistrySearch -SearchPaths @() -DockerSearchTargets @($dockerTarget) -LocalAppDataRoot 'C:\MockAppData\Local'
+
+            $results.Count | Should -Be 0
+            ($script:LastDockerSearchResults | Where-Object { $_.Status -eq 'NotFound' -and $_.Path -eq $missingDockerVhdx }).Count | Should -Be 1
+        }
+
+        It 'Skips unsupported Docker layouts when the parent directory is absent' {
+            $missingLayoutVhdx = 'C:\MockAppData\Local\Docker\wsl\distro\ext4.vhdx'
+            $dockerTarget = [PSCustomObject]@{
+                Path = $missingLayoutVhdx
+                Label = 'Legacy docker-desktop engine store'
+                Layout = 'distro\ext4.vhdx'
+                IsCustomRoot = $false
+            }
+
+            Register-MockFileSystem -Directories @{
+                'C:\MockAppData\Local\Docker\wsl' = New-MockDirectoryItem -FullName 'C:\MockAppData\Local\Docker\wsl'
+            }
+
+            $results = Find-WSLVHDFiles -SkipRegistrySearch -SearchPaths @() -DockerSearchTargets @($dockerTarget) -LocalAppDataRoot 'C:\MockAppData\Local'
+
+            $results.Count | Should -Be 0
+            ($script:LastDockerSearchResults | Where-Object { $_.Status -eq 'MissingLayout' -and $_.Path -eq $missingLayoutVhdx }).Count | Should -Be 1
+        }
+
+        It 'Detects Docker VHDX files inside a custom Docker Desktop storage root' {
+            $customRoot = 'D:\DockerStorage\DockerDesktopWSL'
+            $customVhdx = Join-Path $customRoot 'disk\ext4.vhdx'
+            $dockerTarget = [PSCustomObject]@{
+                Path = $customRoot
+                Label = 'Docker Desktop customWslDistroDir from settings.json'
+                Layout = 'custom root'
+                IsCustomRoot = $true
+            }
+
+            Register-MockFileSystem -Files @{
+                $customVhdx = New-MockVhdxItem -FullName $customVhdx
+            } -Directories @{
+                $customRoot = New-MockDirectoryItem -FullName $customRoot
+            }
+
+            $results = Find-WSLVHDFiles -SkipRegistrySearch -SearchPaths @() -DockerSearchTargets @($dockerTarget) -LocalAppDataRoot 'C:\MockAppData\Local'
+
+            $results.Count | Should -Be 1
+            $results[0].Path | Should -Be $customVhdx
+            $results[0].DockerLabel | Should -Be 'Docker Desktop customWslDistroDir from settings.json'
         }
     }
 
@@ -83,7 +177,7 @@ Describe 'Find-WSLVHDFiles path detection' {
                 $registryRoot = @($registryEntry)
             }
 
-            $results = Find-WSLVHDFiles -SkipRegistrySearch:$false -RegistryRoot $registryRoot -SearchPaths @()
+            $results = Find-WSLVHDFiles -SkipRegistrySearch:$false -SkipDockerSearch -RegistryRoot $registryRoot -SearchPaths @()
 
             $results.Count | Should -Be 1
             $results[0].Path | Should -Be $registeredVhdx
@@ -104,7 +198,7 @@ Describe 'Find-WSLVHDFiles path detection' {
                 $registryRoot = @($registryEntry)
             }
 
-            $results = Find-WSLVHDFiles -SkipRegistrySearch:$false -RegistryRoot $registryRoot -SearchPaths @()
+            $results = Find-WSLVHDFiles -SkipRegistrySearch:$false -SkipDockerSearch -RegistryRoot $registryRoot -SearchPaths @()
 
             $results.Count | Should -Be 1
             $results[0].Path | Should -Be $customVhdx
@@ -120,7 +214,7 @@ Describe 'Find-WSLVHDFiles path detection' {
                 $customVhdx = New-MockVhdxItem -FullName $customVhdx
             }
 
-            $results = Find-WSLVHDFiles -ExplicitPaths @($customVhdx) -SkipRegistrySearch -SearchPaths @()
+            $results = Find-WSLVHDFiles -ExplicitPaths @($customVhdx) -SkipRegistrySearch -SkipDockerSearch -SearchPaths @()
 
             $results.Count | Should -Be 1
             $results[0].Path | Should -Be $customVhdx
@@ -137,7 +231,7 @@ Describe 'Find-WSLVHDFiles path detection' {
                 $customRoot = New-MockDirectoryItem -FullName $customRoot
             }
 
-            $results = Find-WSLVHDFiles -ExplicitPaths @($customRoot) -SkipRegistrySearch -SearchPaths @()
+            $results = Find-WSLVHDFiles -ExplicitPaths @($customRoot) -SkipRegistrySearch -SkipDockerSearch -SearchPaths @()
 
             $results.Count | Should -Be 1
             $results[0].Path | Should -Be $customVhdx
@@ -159,7 +253,7 @@ Describe 'Find-WSLVHDFiles path detection' {
                 }
             }
 
-            $results = Find-WSLVHDFiles -ExplicitPaths @($unsupportedFile, $missingPath) -SkipRegistrySearch -SearchPaths @('Z:\NotPresent')
+            $results = Find-WSLVHDFiles -ExplicitPaths @($unsupportedFile, $missingPath) -SkipRegistrySearch -SkipDockerSearch -SearchPaths @('Z:\NotPresent')
 
             $results.Count | Should -Be 0
             ($script:LastVHDSearchLocations -contains "Explicit path - $unsupportedFile") | Should -BeTrue
@@ -176,8 +270,8 @@ Describe 'Find-WSLVHDFiles path detection' {
                 $networkRoot = New-MockDirectoryItem -FullName $networkRoot
             }
 
-            $defaultResults = Find-WSLVHDFiles -SkipRegistrySearch -SearchPaths @('C:\MockAppData\Local\wsl')
-            $explicitResults = Find-WSLVHDFiles -ExplicitPaths @($networkVhdx) -SkipRegistrySearch -SearchPaths @()
+            $defaultResults = Find-WSLVHDFiles -SkipRegistrySearch -SkipDockerSearch -SearchPaths @('C:\MockAppData\Local\wsl')
+            $explicitResults = Find-WSLVHDFiles -ExplicitPaths @($networkVhdx) -SkipRegistrySearch -SkipDockerSearch -SearchPaths @()
 
             $defaultResults.Count | Should -Be 0
             $explicitResults.Count | Should -Be 1
@@ -197,7 +291,7 @@ Describe 'Find-WSLVHDFiles path detection' {
                 $registryRoot = @($registryEntry)
             }
 
-            $results = Find-WSLVHDFiles -ExplicitPaths @($sharedVhdx) -SkipRegistrySearch:$false -RegistryRoot $registryRoot -SearchPaths @()
+            $results = Find-WSLVHDFiles -ExplicitPaths @($sharedVhdx) -SkipRegistrySearch:$false -SkipDockerSearch -RegistryRoot $registryRoot -SearchPaths @()
 
             $results.Count | Should -Be 1
             $results[0].Path | Should -Be $sharedVhdx

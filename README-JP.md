@@ -231,25 +231,44 @@ wsl --export Ubuntu D:\Backups\Ubuntu-before-vhdx-compact.tar
 
 Docker Desktop の重要なイメージ、ボリューム、コンテナは Docker 側のバックアップ / エクスポート手順を使ってください。
 
+## Docker Desktop VHDX 検出
+
+このスクリプトは `%LOCALAPPDATA%\Docker\wsl` 配下の一般的な Docker Desktop WSL2 バックエンド配置と、`%APPDATA%\Docker\settings.json` に設定されたカスタム保存先を検索します。
+
+| パス | 主な用途 |
+|------|----------|
+| `%LOCALAPPDATA%\Docker\wsl\data\ext4.vhdx` | 旧 `docker-desktop-data` ストア |
+| `%LOCALAPPDATA%\Docker\wsl\distro\ext4.vhdx` | 旧 `docker-desktop` エンジンストア |
+| `%LOCALAPPDATA%\Docker\wsl\main\ext4.vhdx` | Docker Desktop エンジン VM |
+| `%LOCALAPPDATA%\Docker\wsl\disk\ext4.vhdx` | 統合 Docker Desktop ディスクイメージ |
+| `%LOCALAPPDATA%\Docker\wsl\disk\docker_data.vhdx` | 旧インストール向け Docker データディスク |
+| `%LOCALAPPDATA%\Docker\wsl\DockerDesktopWSL\...` | GUI で管理されるカスタムディスクフォルダ |
+| `settings.json` の `customWslDistroDir` | ユーザー指定の Docker Desktop 保存先 |
+
+検出後、スクリプトは各 Docker 関連パスについて `[DETECTED]`、`[NOT FOUND]`、`[SKIPPED]` の Docker Desktop サマリーを表示します。WSL レジストリで `docker-desktop` または `docker-desktop-data` として登録されている VHDX も報告されます。
+
+Docker Desktop が未インストールの場合、想定される Docker パスはスキップまたは not found として記録され、処理は継続します。これらの配置外にある VHDX には `-VHDPath` を使ってください。
+
 ## 処理フロー
 
 1. `-WhatIf` を使わない場合は管理者権限を確認します。
 2. WSL が利用可能か確認します。
 3. `-Force` または `-WhatIf` が指定されていない場合は確認プロンプトを表示します。
-4. 登録済み WSL ディストリビューションと標準的な場所から `ext4.vhdx` を検索します。
-5. dry-run モードでは実行予定を表示して終了します。
-6. 任意で WSL 内の `docker system prune --force` を実行します。
-7. `wsl --shutdown` を実行します。
-8. `Optimize-VHD` または `diskpart` で VHDX を圧縮します。
-9. 実行前後のサイズと成功件数を表示します。
+4. 登録済み WSL ディストリビューション、標準 WSL パス、既知の Docker Desktop 配置から VHDX を検索します。
+5. Docker 関連パスの検出 / 未検出 / スキップ結果を Docker Desktop サマリーとして表示します。
+6. dry-run モードでは実行予定を表示して終了します。
+7. 任意で WSL 内の `docker system prune --force` を実行します。
+8. `wsl --shutdown` を実行します。
+9. `Optimize-VHD` または `diskpart` で VHDX を圧縮します。
+10. 実行前後のサイズと成功件数を表示します。
 
 ## 既知の制限
 
 - WSL1 ディストリビューションは対象外です。
-- 検索対象は登録済み WSL2 ディストリビューション、`%LOCALAPPDATA%\wsl`、`%LOCALAPPDATA%\Packages`、`%LOCALAPPDATA%\Docker` です。
+- 検索対象は登録済み WSL2 ディストリビューション、`%LOCALAPPDATA%\wsl`、`%LOCALAPPDATA%\Packages`、および既知の Docker Desktop WSL2 バックエンド配置です。
+- Docker Desktop 検出では、見つかった / 見つからなかった / スキップした Docker 関連 VHDX をログに記録します。
 - カスタム VHDX の場所は `-VHDPath` で明示的に含められます。
-- Docker Desktop のバージョンによって VHDX の場所が異なる場合があります。
-- ネットワークドライブ上の WSL インストールは対象外です。
+- ネットワークドライブ上の WSL インストールは、`-VHDPath` を指定しない限り対象外です。
 - JSON 出力と対話的な個別パス選択は未対応です。
 - `-WhatIf` または `-DryRun` で、変更を加えずに検出結果と実行予定を確認できます。
 - VHDX のサイズやディスク速度によって、圧縮に数分から数時間かかる場合があります。

@@ -16,10 +16,6 @@ Add GitHub Actions for static validation. Initial checks should include PowerShe
 
 Add Pester tests for administrator checks, fallback selection, and logging behavior. Path detection tests now cover mocked standard WSL, Docker Desktop, registry, and custom/unsupported inputs.
 
-### Better Docker Desktop Detection
-
-Improve support for Docker Desktop path variations across versions and installation layouts. The tool should clearly report which Docker Desktop VHDX files were detected and which were skipped.
-
 ### Interactive VHDX Selection
 
 Add interactive per-path selection so users can choose which detected VHDX files to compact during a manual run.
@@ -51,6 +47,10 @@ Added `-WhatIf` and `-DryRun` preview mode that lists detected VHDX files, plann
 ### Path Detection Tests
 
 Added Pester tests with mocked filesystem and registry inputs for standard WSL package paths, Docker Desktop paths, registry-backed distributions, and custom or unsupported explicit paths.
+
+### Better Docker Desktop Detection
+
+Added explicit Docker Desktop WSL2 backend path checks, custom storage root discovery, Docker detection summary logging, and documentation for common Docker VHDX layouts and backup considerations.
 
 ### Custom VHDX Path Support
 

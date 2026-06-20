@@ -231,25 +231,44 @@ wsl --export Ubuntu D:\Backups\Ubuntu-before-vhdx-compact.tar
 
 For Docker Desktop data, use Docker's own backup/export process for important images, volumes, and containers.
 
+## Docker Desktop VHDX Detection
+
+The script searches common Docker Desktop WSL2 backend layouts under `%LOCALAPPDATA%\Docker\wsl` and any custom storage roots configured in `%APPDATA%\Docker\settings.json`.
+
+| Path | Typical use |
+|------|-------------|
+| `%LOCALAPPDATA%\Docker\wsl\data\ext4.vhdx` | Legacy `docker-desktop-data` store |
+| `%LOCALAPPDATA%\Docker\wsl\distro\ext4.vhdx` | Legacy `docker-desktop` engine store |
+| `%LOCALAPPDATA%\Docker\wsl\main\ext4.vhdx` | Docker Desktop engine VM |
+| `%LOCALAPPDATA%\Docker\wsl\disk\ext4.vhdx` | Unified Docker Desktop disk image |
+| `%LOCALAPPDATA%\Docker\wsl\disk\docker_data.vhdx` | Legacy Docker data disk for older installs |
+| `%LOCALAPPDATA%\Docker\wsl\DockerDesktopWSL\...` | GUI-managed custom disk image folder |
+| `customWslDistroDir` from `settings.json` | User-selected Docker Desktop storage location |
+
+After detection, the script prints a Docker Desktop summary such as `[DETECTED]`, `[NOT FOUND]`, or `[SKIPPED]` for each checked path. Registered WSL distributions named `docker-desktop` or `docker-desktop-data` are also reported when found through the WSL registry.
+
+If Docker Desktop is not installed, expected Docker paths are skipped or logged as not found without stopping the run. Use `-VHDPath` when your Docker VHDX lives outside these layouts.
+
 ## Process Flow
 
 1. Verify administrator privileges unless `-WhatIf` is used.
 2. Check WSL availability.
 3. Ask for confirmation unless `-Force` or `-WhatIf` is used.
-4. Search registered WSL distributions and common locations for `ext4.vhdx`.
-5. In dry-run mode, print planned actions and exit without making changes.
-6. Optionally run `docker system prune --force` inside WSL.
-7. Run `wsl --shutdown`.
-8. Compact each VHDX with `Optimize-VHD` or `diskpart`.
-9. Report before/after sizes and success counts.
+4. Search registered WSL distributions, standard WSL paths, and known Docker Desktop layouts for VHDX files.
+5. Print a Docker Desktop detection summary for detected, missing, and skipped Docker-related paths.
+6. In dry-run mode, print planned actions and exit without making changes.
+7. Optionally run `docker system prune --force` inside WSL.
+8. Run `wsl --shutdown`.
+9. Compact each VHDX with `Optimize-VHD` or `diskpart`.
+10. Report before/after sizes and success counts.
 
 ## Known Limitations
 
 - WSL1 distributions are not supported.
-- The search logic checks registered WSL2 distributions, `%LOCALAPPDATA%\wsl`, `%LOCALAPPDATA%\Packages`, and `%LOCALAPPDATA%\Docker`.
+- The search logic checks registered WSL2 distributions, `%LOCALAPPDATA%\wsl`, `%LOCALAPPDATA%\Packages`, and known Docker Desktop WSL2 backend layouts.
+- Docker Desktop detection logs which Docker-related VHDX files were found, missing, or skipped for the current install layout.
 - Custom VHDX locations can be included with `-VHDPath`.
-- Docker Desktop VHDX paths can vary by Docker Desktop version.
-- Network-drive based WSL installations are not supported.
+- Network-drive based WSL installations are not supported unless explicitly passed with `-VHDPath`.
 - The tool does not currently provide JSON output or interactive per-path selection.
 - Use `-WhatIf` or `-DryRun` to preview detected files and planned actions without making changes.
 - Compaction can take minutes to hours depending on VHDX size and disk speed.
@@ -261,7 +280,7 @@ For Docker Desktop data, use Docker's own backup/export process for important im
 | `Optimize-VHD is not available` | Hyper-V module is unavailable | Expected behavior; the script falls back to `diskpart` |
 | `This script must be run with administrator privileges` | The shell is not elevated | Reopen Command Prompt or PowerShell as Administrator |
 | `Docker system prune failed` | Docker is unavailable in the selected WSL distribution | Start Docker or select the WSL distribution where Docker CLI works |
-| `No VHD files found` | VHDX files are not registered or are in an unusual location | Check the searched locations in the log and rerun with `-VHDPath <path-to-ext4.vhdx>` |
+| `No VHD files found` | VHDX files are not registered or are in an unusual location | Check the searched locations and Docker Desktop summary in the log, then rerun with `-VHDPath <path-to-vhdx>` |
 | WSL distribution does not start after compaction | VHDX corruption or interrupted disk operation | Restore from a `wsl --export` backup |
 
 Diagnostic commands:

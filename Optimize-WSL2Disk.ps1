@@ -128,6 +128,141 @@ function Invoke-WSLDockerSystemPrune {
 
 # Search locations are kept for diagnostics when no VHDX files are found.
 $script:LastVHDSearchLocations = @()
+$script:LastDockerSearchResults = @()
+
+function Get-DockerDesktopCustomStorageRoots {
+    param(
+        [string]$LocalAppDataRoot = $env:LOCALAPPDATA,
+        [string]$AppDataRoot = $env:APPDATA
+    )
+
+    $roots = New-Object System.Collections.ArrayList
+    $defaultDockerWslRoot = Join-Path $LocalAppDataRoot "Docker\wsl"
+    $dockerDesktopWslRoot = Join-Path $defaultDockerWslRoot "DockerDesktopWSL"
+
+    if (Test-Path -LiteralPath $dockerDesktopWslRoot) {
+        [void]$roots.Add([PSCustomObject]@{
+            Path = $dockerDesktopWslRoot
+            Label = "Docker Desktop GUI disk image folder (DockerDesktopWSL)"
+        })
+    }
+
+    $settingsPath = Join-Path $AppDataRoot "Docker\settings.json"
+    if (Test-Path -LiteralPath $settingsPath) {
+        try {
+            $settingsRaw = Get-Content -LiteralPath $settingsPath -Raw -ErrorAction Stop
+            if (-not [string]::IsNullOrWhiteSpace($settingsRaw)) {
+                $settings = $settingsRaw | ConvertFrom-Json
+                if (-not [string]::IsNullOrWhiteSpace($settings.customWslDistroDir)) {
+                    $customRoot = [Environment]::ExpandEnvironmentVariables($settings.customWslDistroDir)
+                    if (-not [string]::IsNullOrWhiteSpace($customRoot)) {
+                        [void]$roots.Add([PSCustomObject]@{
+                            Path = $customRoot
+                            Label = "Docker Desktop customWslDistroDir from settings.json"
+                        })
+                    }
+                }
+            }
+        }
+        catch {
+            Write-Log "Unable to read Docker Desktop settings for custom storage paths: $settingsPath ($($_.Exception.Message))" "WARN"
+        }
+    }
+
+    return @($roots)
+}
+
+function Get-DockerDesktopSearchTargets {
+    param(
+        [string]$LocalAppDataRoot = $env:LOCALAPPDATA,
+        [string]$AppDataRoot = $env:APPDATA
+    )
+
+    $dockerWslRoot = Join-Path $LocalAppDataRoot "Docker\wsl"
+    $targets = New-Object System.Collections.ArrayList
+
+    $knownRelativeTargets = @(
+        @{ RelativePath = "data\ext4.vhdx"; Label = "Legacy docker-desktop-data store" },
+        @{ RelativePath = "distro\ext4.vhdx"; Label = "Legacy docker-desktop engine store" },
+        @{ RelativePath = "main\ext4.vhdx"; Label = "Docker Desktop engine VM" },
+        @{ RelativePath = "disk\ext4.vhdx"; Label = "Docker Desktop unified disk image" },
+        @{ RelativePath = "disk\docker_data.vhdx"; Label = "Legacy Docker data disk" }
+    )
+
+    foreach ($knownTarget in $knownRelativeTargets) {
+        [void]$targets.Add([PSCustomObject]@{
+            Path = Join-Path $dockerWslRoot $knownTarget.RelativePath
+            Label = $knownTarget.Label
+            Layout = $knownTarget.RelativePath
+            IsCustomRoot = $false
+        })
+    }
+
+    foreach ($customRoot in (Get-DockerDesktopCustomStorageRoots -LocalAppDataRoot $LocalAppDataRoot -AppDataRoot $AppDataRoot)) {
+        [void]$targets.Add([PSCustomObject]@{
+            Path = $customRoot.Path
+            Label = $customRoot.Label
+            Layout = "custom root"
+            IsCustomRoot = $true
+        })
+    }
+
+    return @($targets)
+}
+
+function Write-DockerDetectionReport {
+    param([array]$VHDFiles)
+
+    $dockerRegistryFiles = @($VHDFiles | Where-Object {
+        -not [string]::IsNullOrWhiteSpace($_.Distribution) -and $_.Distribution -match '^docker-desktop'
+    })
+
+    Write-Log "Docker Desktop detection summary:"
+    $reportedPaths = @{}
+
+    foreach ($result in $script:LastDockerSearchResults) {
+        if ($result.Status -ne "Detected") {
+            continue
+        }
+
+        $reportedPaths[$result.Path.ToLowerInvariant()] = $true
+        Write-Log "  [DETECTED] $($result.Path) ($($result.Label))" "SUCCESS"
+    }
+
+    foreach ($file in $dockerRegistryFiles) {
+        $key = $file.Path.ToLowerInvariant()
+        if ($reportedPaths.ContainsKey($key)) {
+            continue
+        }
+
+        $reportedPaths[$key] = $true
+        Write-Log "  [DETECTED] $($file.Path) (Registered WSL distribution: $($file.Distribution))" "SUCCESS"
+    }
+
+    foreach ($result in $script:LastDockerSearchResults) {
+        switch ($result.Status) {
+            "NotFound" {
+                Write-Log "  [NOT FOUND] $($result.Path) ($($result.Label))" "WARN"
+            }
+            "MissingCustomRoot" {
+                Write-Log "  [NOT FOUND] $($result.Path) ($($result.Label))" "WARN"
+            }
+            "MissingRoot" {
+                Write-Log "  [NOT FOUND] $($result.Path) ($($result.Label))" "WARN"
+            }
+            "MissingLayout" {
+                Write-Log "  [SKIPPED] $($result.Path) ($($result.Label)) - layout not present on this system"
+            }
+            "CustomRootEmpty" {
+                Write-Log "  [NOT FOUND] $($result.Path) ($($result.Label)) - no Docker VHDX files found in custom location" "WARN"
+            }
+        }
+    }
+
+    if ($dockerRegistryFiles.Count -eq 0 -and -not ($script:LastDockerSearchResults | Where-Object { $_.Status -eq "Detected" })) {
+        Write-Log "  No Docker Desktop VHDX files detected. Docker Desktop may not be installed, may use an unsupported layout, or may require -VHDPath." "WARN"
+    }
+}
 
 # Search for VHD files
 function Find-WSLVHDFiles {
@@ -135,12 +270,17 @@ function Find-WSLVHDFiles {
         [string[]]$ExplicitPaths,
         [string[]]$SearchPaths,
         [switch]$SkipRegistrySearch,
-        [string]$RegistryRoot = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss"
+        [switch]$SkipDockerSearch,
+        [string]$RegistryRoot = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss",
+        [string]$LocalAppDataRoot = $env:LOCALAPPDATA,
+        [string]$AppDataRoot = $env:APPDATA,
+        [array]$DockerSearchTargets
     )
 
     $vhdFiles = New-Object System.Collections.ArrayList
     $seenPaths = @{}
     $script:LastVHDSearchLocations = @()
+    $script:LastDockerSearchResults = @()
 
     function Add-SearchLocation {
         param([string]$Path, [string]$Source)
@@ -154,7 +294,8 @@ function Find-WSLVHDFiles {
         param(
             [string]$Path,
             [string]$Source,
-            [string]$DistributionName = ""
+            [string]$DistributionName = "",
+            [string]$DockerLabel = ""
         )
 
         try {
@@ -181,10 +322,92 @@ function Find-WSLVHDFiles {
                 Directory = $item.Directory.Name
                 Source = $Source
                 Distribution = $DistributionName
+                DockerLabel = $DockerLabel
             })
         }
         catch {
             Write-Log "Unable to inspect VHDX candidate: $Path ($($_.Exception.Message))" "WARN"
+        }
+    }
+
+    function Add-DockerSearchResult {
+        param(
+            [string]$Status,
+            [string]$Path,
+            [string]$Label,
+            [string]$Message = ""
+        )
+
+        [void]$script:LastDockerSearchResults.Add([PSCustomObject]@{
+            Status = $Status
+            Path = $Path
+            Label = $Label
+            Message = $Message
+        })
+    }
+
+    function Add-DockerVHDFilesFromRoot {
+        param(
+            [string]$RootPath,
+            [string]$Label
+        )
+
+        Add-SearchLocation -Path $RootPath -Source "Docker Desktop"
+        if (-not (Test-Path -LiteralPath $RootPath)) {
+            Add-DockerSearchResult -Status "MissingCustomRoot" -Path $RootPath -Label $Label -Message "Custom Docker Desktop storage root not found"
+            Write-Log "Docker Desktop custom storage path not found: $RootPath ($Label)" "WARN"
+            return
+        }
+
+        Write-Log "Searching Docker Desktop custom storage path: $RootPath ($Label)"
+        $dockerFileNames = @("ext4.vhdx", "docker_data.vhdx")
+        $foundAny = $false
+
+        foreach ($fileName in $dockerFileNames) {
+            $files = Get-ChildItem -LiteralPath $RootPath -Recurse -Filter $fileName -ErrorAction SilentlyContinue
+            foreach ($file in $files) {
+                $foundAny = $true
+                Add-VHDFile -Path $file.FullName -Source "Docker Desktop" -DockerLabel $Label
+                Add-DockerSearchResult -Status "Detected" -Path $file.FullName -Label $Label
+            }
+        }
+
+        if (-not $foundAny) {
+            Add-DockerSearchResult -Status "CustomRootEmpty" -Path $RootPath -Label $Label -Message "No Docker VHDX files found in custom storage root"
+            Write-Log "Docker Desktop custom storage path checked but no VHDX files were found: $RootPath ($Label)" "WARN"
+        }
+    }
+
+    function Search-DockerDesktopVHDFiles {
+        param([array]$Targets)
+
+        $dockerWslRoot = Join-Path $LocalAppDataRoot "Docker\wsl"
+        if (-not (Test-Path -LiteralPath $dockerWslRoot)) {
+            Add-DockerSearchResult -Status "MissingRoot" -Path $dockerWslRoot -Label "Docker Desktop WSL root" -Message "Docker Desktop WSL directory not present"
+            Write-Log "Docker Desktop WSL directory not found: $dockerWslRoot. Docker Desktop may not be installed or may use a custom-only layout." "WARN"
+        }
+
+        foreach ($target in $Targets) {
+            if ($target.IsCustomRoot) {
+                Add-DockerVHDFilesFromRoot -RootPath $target.Path -Label $target.Label
+                continue
+            }
+
+            Add-SearchLocation -Path $target.Path -Source "Docker Desktop"
+            if (Test-Path -LiteralPath $target.Path) {
+                Add-VHDFile -Path $target.Path -Source "Docker Desktop" -DockerLabel $target.Label
+                Add-DockerSearchResult -Status "Detected" -Path $target.Path -Label $target.Label
+                continue
+            }
+
+            $parentPath = Split-Path -Path $target.Path -Parent
+            if (Test-Path -LiteralPath $parentPath) {
+                Add-DockerSearchResult -Status "NotFound" -Path $target.Path -Label $target.Label -Message "Expected Docker Desktop layout path exists but VHDX file was not found"
+                Write-Log "Docker Desktop path checked but VHDX not found: $($target.Path) ($($target.Label))" "WARN"
+            }
+            else {
+                Add-DockerSearchResult -Status "MissingLayout" -Path $target.Path -Label $target.Label -Message "Docker Desktop layout not present on this system"
+            }
         }
     }
 
@@ -260,14 +483,21 @@ function Find-WSLVHDFiles {
 
     if ($null -eq $SearchPaths) {
         $SearchPaths = @(
-            "$env:LOCALAPPDATA\wsl",
-            "$env:LOCALAPPDATA\Packages",
-            "$env:LOCALAPPDATA\Docker"
+            (Join-Path $LocalAppDataRoot "wsl"),
+            (Join-Path $LocalAppDataRoot "Packages")
         )
     }
 
     foreach ($searchPath in $SearchPaths) {
         Add-VHDFilesFromDirectory -Path $searchPath -Source "Standard path"
+    }
+
+    if (-not $SkipDockerSearch) {
+        if ($null -eq $DockerSearchTargets) {
+            $DockerSearchTargets = Get-DockerDesktopSearchTargets -LocalAppDataRoot $LocalAppDataRoot -AppDataRoot $AppDataRoot
+        }
+
+        Search-DockerDesktopVHDFiles -Targets $DockerSearchTargets
     }
 
     return @($vhdFiles)
@@ -352,7 +582,11 @@ function Show-DryRunPlan {
 
         Write-Host ""
         Write-Host "    Path: $($vhd.Path)" -ForegroundColor White
-        Write-Host "    Size: $($vhd.SizeGB) GB, Last Modified: $($vhd.LastModified), Source: $($vhd.Source)$distributionText"
+        $dockerLabelText = ""
+        if (-not [string]::IsNullOrWhiteSpace($vhd.DockerLabel)) {
+            $dockerLabelText = ", Docker: $($vhd.DockerLabel)"
+        }
+        Write-Host "    Size: $($vhd.SizeGB) GB, Last Modified: $($vhd.LastModified), Source: $($vhd.Source)$distributionText$dockerLabelText"
 
         if ($useOptimizeVHD) {
             Write-Host "    Planned method: Optimize-VHD -Path `"$($vhd.Path)`" -Mode Full"
@@ -476,6 +710,7 @@ function Main {
     # Search for VHD files before any destructive action
     Write-Log "Searching for WSL VHD files..."
     $vhdFiles = Find-WSLVHDFiles -ExplicitPaths $VHDPath
+    Write-DockerDetectionReport -VHDFiles $vhdFiles
 
     if ($WhatIf) {
         Show-DryRunPlan -VHDFiles $vhdFiles -IncludeDockerPrune:$DockerPrune -DockerDistro $DockerPruneDistro
@@ -509,7 +744,11 @@ function Main {
         if (-not [string]::IsNullOrWhiteSpace($_.Distribution)) {
             $distributionText = ", Distribution: $($_.Distribution)"
         }
-        Write-Log "  - $($_.Path) (Size: $($_.SizeGB) GB, Last Modified: $($_.LastModified), Source: $($_.Source)$distributionText)"
+        $dockerLabelText = ""
+        if (-not [string]::IsNullOrWhiteSpace($_.DockerLabel)) {
+            $dockerLabelText = ", Docker: $($_.DockerLabel)"
+        }
+        Write-Log "  - $($_.Path) (Size: $($_.SizeGB) GB, Last Modified: $($_.LastModified), Source: $($_.Source)$distributionText$dockerLabelText)"
     }
 
     # Optional Docker cleanup before WSL shutdown
