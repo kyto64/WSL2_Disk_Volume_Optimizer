@@ -81,6 +81,20 @@ To skip the confirmation prompt:
 .\Optimize-WSL2Disk.ps1 -Force
 ```
 
+To preview detected VHDX files and planned actions without shutting down WSL or compacting anything:
+
+```powershell
+.\Optimize-WSL2Disk.ps1 -WhatIf
+```
+
+`-DryRun` is an alias for `-WhatIf`. Dry-run mode does not require administrator privileges because it only reports detection results and planned commands.
+
+To include Docker cleanup in the dry-run plan:
+
+```powershell
+.\Optimize-WSL2Disk.ps1 -WhatIf -DockerPrune
+```
+
 To run Docker cleanup before WSL shutdown and VHDX compaction:
 
 ```powershell
@@ -134,6 +148,21 @@ Record the execution environment with your result:
 | Recovered space | Calculated from your measured values |
 
 ## Example Logs
+
+### Dry-run Preview
+
+Use dry-run mode to validate detection and review planned commands before running the actual optimizer:
+
+```powershell
+.\Optimize-WSL2Disk.ps1 -WhatIf
+```
+
+Dry-run mode:
+
+- Lists detected VHDX paths, sizes, and sources.
+- Shows planned `docker system prune`, `wsl --shutdown`, and compaction commands.
+- Prints safety warnings and an estimated risk level.
+- Does not call `wsl --shutdown`, `Optimize-VHD`, `diskpart`, or `docker system prune`.
 
 ### Successful Run
 
@@ -204,14 +233,15 @@ For Docker Desktop data, use Docker's own backup/export process for important im
 
 ## Process Flow
 
-1. Verify administrator privileges.
+1. Verify administrator privileges unless `-WhatIf` is used.
 2. Check WSL availability.
-3. Ask for confirmation unless `-Force` is used.
-4. Optionally run `docker system prune --force` inside WSL.
-5. Run `wsl --shutdown`.
-6. Search registered WSL distributions and common locations for `ext4.vhdx`.
-7. Compact each VHDX with `Optimize-VHD` or `diskpart`.
-8. Report before/after sizes and success counts.
+3. Ask for confirmation unless `-Force` or `-WhatIf` is used.
+4. Search registered WSL distributions and common locations for `ext4.vhdx`.
+5. In dry-run mode, print planned actions and exit without making changes.
+6. Optionally run `docker system prune --force` inside WSL.
+7. Run `wsl --shutdown`.
+8. Compact each VHDX with `Optimize-VHD` or `diskpart`.
+9. Report before/after sizes and success counts.
 
 ## Known Limitations
 
@@ -220,7 +250,8 @@ For Docker Desktop data, use Docker's own backup/export process for important im
 - Custom VHDX locations can be included with `-VHDPath`.
 - Docker Desktop VHDX paths can vary by Docker Desktop version.
 - Network-drive based WSL installations are not supported.
-- The tool does not currently provide dry-run mode, JSON output, or interactive per-path selection.
+- The tool does not currently provide JSON output or interactive per-path selection.
+- Use `-WhatIf` or `-DryRun` to preview detected files and planned actions without making changes.
 - Compaction can take minutes to hours depending on VHDX size and disk speed.
 
 ## Troubleshooting

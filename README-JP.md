@@ -81,6 +81,20 @@ Docker cleanup メニューでは以下を選べます。
 .\Optimize-WSL2Disk.ps1 -Force
 ```
 
+WSL を停止したり VHDX を圧縮したりせず、検出結果と実行予定のコマンドだけを確認する場合:
+
+```powershell
+.\Optimize-WSL2Disk.ps1 -WhatIf
+```
+
+`-DryRun` は `-WhatIf` の別名です。dry-run モードは検出と計画表示のみを行うため、管理者権限は不要です。
+
+dry-run の計画に Docker cleanup を含める場合:
+
+```powershell
+.\Optimize-WSL2Disk.ps1 -WhatIf -DockerPrune
+```
+
 WSL の停止と VHDX 圧縮前に Docker cleanup を実行する場合:
 
 ```powershell
@@ -134,6 +148,21 @@ wsl -d Ubuntu -- df -h /
 | 回収できた容量 | 実測値から計算 |
 
 ## 実行ログ例
+
+### dry-run プレビュー
+
+本番実行の前に検出結果と実行予定のコマンドを確認するには dry-run モードを使います。
+
+```powershell
+.\Optimize-WSL2Disk.ps1 -WhatIf
+```
+
+dry-run モードでは以下を行います。
+
+- 検出された VHDX のパス、サイズ、検出元を表示します。
+- 予定される `docker system prune`、`wsl --shutdown`、圧縮コマンドを表示します。
+- 安全上の警告と推定リスクを表示します。
+- `wsl --shutdown`、`Optimize-VHD`、`diskpart`、`docker system prune` は実行しません。
 
 ### 正常終了時
 
@@ -204,14 +233,15 @@ Docker Desktop の重要なイメージ、ボリューム、コンテナは Dock
 
 ## 処理フロー
 
-1. 管理者権限を確認します。
+1. `-WhatIf` を使わない場合は管理者権限を確認します。
 2. WSL が利用可能か確認します。
-3. `-Force` が指定されていない場合は確認プロンプトを表示します。
-4. 任意で WSL 内の `docker system prune --force` を実行します。
-5. `wsl --shutdown` を実行します。
-6. 登録済み WSL ディストリビューションと標準的な場所から `ext4.vhdx` を検索します。
-7. `Optimize-VHD` または `diskpart` で VHDX を圧縮します。
-8. 実行前後のサイズと成功件数を表示します。
+3. `-Force` または `-WhatIf` が指定されていない場合は確認プロンプトを表示します。
+4. 登録済み WSL ディストリビューションと標準的な場所から `ext4.vhdx` を検索します。
+5. dry-run モードでは実行予定を表示して終了します。
+6. 任意で WSL 内の `docker system prune --force` を実行します。
+7. `wsl --shutdown` を実行します。
+8. `Optimize-VHD` または `diskpart` で VHDX を圧縮します。
+9. 実行前後のサイズと成功件数を表示します。
 
 ## 既知の制限
 
@@ -220,7 +250,8 @@ Docker Desktop の重要なイメージ、ボリューム、コンテナは Dock
 - カスタム VHDX の場所は `-VHDPath` で明示的に含められます。
 - Docker Desktop のバージョンによって VHDX の場所が異なる場合があります。
 - ネットワークドライブ上の WSL インストールは対象外です。
-- dry-run mode、JSON 出力、対話的な個別パス選択は未対応です。
+- JSON 出力と対話的な個別パス選択は未対応です。
+- `-WhatIf` または `-DryRun` で、変更を加えずに検出結果と実行予定を確認できます。
 - VHDX のサイズやディスク速度によって、圧縮に数分から数時間かかる場合があります。
 
 ## トラブルシューティング

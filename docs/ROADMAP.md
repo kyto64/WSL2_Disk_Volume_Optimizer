@@ -4,10 +4,6 @@ This roadmap captures planned improvements for making WSL2 Disk Volume Optimizer
 
 ## Planned
 
-### Dry-run Mode
-
-Add a `-WhatIf` or `-DryRun` mode that lists detected VHDX files, estimated sizes, planned commands, and safety warnings without shutting down WSL or compacting anything.
-
 ### PowerShell Module
 
 Package the core logic as a PowerShell module (`.psm1`) with public functions for discovery, safety checks, and compaction. This would make the tool easier to install, test, and reuse.
@@ -47,6 +43,10 @@ A small GUI or terminal UI could make safety checks and result reporting clearer
 Add structured output for automation, including detected files, before/after sizes, selected compaction method, and per-file status.
 
 ## Completed
+
+### Dry-run Mode
+
+Added `-WhatIf` and `-DryRun` preview mode that lists detected VHDX files, planned commands, safety warnings, and estimated risk without shutting down WSL or compacting anything.
 
 ### Custom VHDX Path Support
 

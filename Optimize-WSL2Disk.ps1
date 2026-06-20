@@ -1,5 +1,3 @@
-#Requires -RunAsAdministrator
-
 <#
 .SYNOPSIS
     Tool for freeing up WSL2 disk space
@@ -10,6 +8,11 @@
 
 .PARAMETER Force
     Skip confirmation prompts and execute
+
+.PARAMETER WhatIf
+    Report detected VHDX files, planned commands, and safety warnings without making changes.
+    Does not run wsl --shutdown, Optimize-VHD, diskpart, or docker system prune.
+    Alias: DryRun
 
 .PARAMETER DockerPrune
     Run docker system prune --force inside WSL before shutting down WSL and compacting VHD files
@@ -27,6 +30,12 @@
     .\Optimize-WSL2Disk.ps1 -Force
 
 .EXAMPLE
+    .\Optimize-WSL2Disk.ps1 -WhatIf
+
+.EXAMPLE
+    .\Optimize-WSL2Disk.ps1 -DryRun -DockerPrune
+
+.EXAMPLE
     .\Optimize-WSL2Disk.ps1 -DockerPrune
 
 .EXAMPLE
@@ -36,12 +45,15 @@
     .\Optimize-WSL2Disk.ps1 -VHDPath "C:\Users\user\AppData\Local\wsl\{guid}\ext4.vhdx"
 
 .NOTES
-    This script must be run with administrator privileges.
+    Actual compaction requires administrator privileges.
+    Use -WhatIf to preview planned actions without elevation.
     It is strongly recommended to backup your WSL environment before execution.
 #>
 
 param(
     [switch]$Force,
+    [Alias("DryRun")]
+    [switch]$WhatIf,
     [switch]$DockerPrune,
     [string]$DockerPruneDistro,
     [string[]]$VHDPath
@@ -256,6 +268,114 @@ function Find-WSLVHDFiles {
 }
 
 # VHD optimization using Optimize-VHD
+function Test-OptimizeVHDAvailable {
+    return $null -ne (Get-Command Optimize-VHD -ErrorAction SilentlyContinue)
+}
+
+function Get-DiskpartCompactionScript {
+    param([string]$VHDPath)
+
+    return @"
+select vdisk file="$VHDPath"
+attach vdisk readonly
+compact vdisk
+detach vdisk
+exit
+"@
+}
+
+function Get-DockerPruneCommandText {
+    param([string]$Distro)
+
+    if ([string]::IsNullOrWhiteSpace($Distro)) {
+        return "wsl -- docker system prune --force"
+    }
+
+    return "wsl -d `"$Distro`" -- docker system prune --force"
+}
+
+function Show-DryRunPlan {
+    param(
+        [array]$VHDFiles,
+        [bool]$IncludeDockerPrune,
+        [string]$DockerDistro
+    )
+
+    Write-Log "Dry-run mode enabled. No changes will be made." "WARN"
+    Write-Host ""
+
+    Write-Host "Safety warnings:" -ForegroundColor Yellow
+    Write-Host "  - VHDX compaction is a low-level disk operation and can corrupt a distribution if interrupted."
+    Write-Host "  - Export important WSL distributions before running the actual optimizer."
+    Write-Host "  - wsl --shutdown stops all running WSL sessions and Docker Desktop WSL backends."
+    if ($IncludeDockerPrune) {
+        Write-Host "  - docker system prune removes unused Docker images, containers, and networks."
+    }
+    Write-Host ""
+
+    Write-Host "Planned actions:" -ForegroundColor Cyan
+    $step = 1
+
+    if ($IncludeDockerPrune) {
+        $dockerCommand = Get-DockerPruneCommandText -Distro $DockerDistro
+        Write-Host "  $step. Run Docker cleanup: $dockerCommand"
+        $step++
+    }
+
+    Write-Host "  $step. Shut down WSL: wsl --shutdown"
+    $step++
+
+    if ($VHDFiles.Count -eq 0) {
+        Write-Host "  $step. No VHDX files detected. Compaction would not run."
+        Write-Log "Dry-run completed. No VHDX files were detected." "WARN"
+        return
+    }
+
+    Write-Host "  $step. Compact $($VHDFiles.Count) detected VHDX file(s):"
+    $step++
+
+    $useOptimizeVHD = Test-OptimizeVHDAvailable
+    $totalSizeGB = 0
+
+    foreach ($vhd in $VHDFiles) {
+        $totalSizeGB += $vhd.SizeGB
+        $distributionText = ""
+        if (-not [string]::IsNullOrWhiteSpace($vhd.Distribution)) {
+            $distributionText = ", Distribution: $($vhd.Distribution)"
+        }
+
+        Write-Host ""
+        Write-Host "    Path: $($vhd.Path)" -ForegroundColor White
+        Write-Host "    Size: $($vhd.SizeGB) GB, Last Modified: $($vhd.LastModified), Source: $($vhd.Source)$distributionText"
+
+        if ($useOptimizeVHD) {
+            Write-Host "    Planned method: Optimize-VHD -Path `"$($vhd.Path)`" -Mode Full"
+        }
+        else {
+            Write-Host "    Planned method: diskpart (Optimize-VHD is not available on this system)"
+            Write-Host "    Planned diskpart script:"
+            $diskpartScript = Get-DiskpartCompactionScript -VHDPath $vhd.Path
+            foreach ($line in ($diskpartScript -split "`r?`n")) {
+                if (-not [string]::IsNullOrWhiteSpace($line)) {
+                    Write-Host "      $line"
+                }
+            }
+        }
+    }
+
+    Write-Host ""
+    $estimatedRisk = if ($VHDFiles.Count -gt 0) { "High" } else { "Low" }
+    if ($IncludeDockerPrune -and $estimatedRisk -ne "High") {
+        $estimatedRisk = "Medium"
+    }
+
+    Write-Host "Estimated risk: $estimatedRisk" -ForegroundColor $(if ($estimatedRisk -eq "High") { "Red" } elseif ($estimatedRisk -eq "Medium") { "Yellow" } else { "Green" })
+    Write-Host "Detected VHDX total size: $([Math]::Round($totalSizeGB, 2)) GB"
+    Write-Host ""
+    Write-Log "Dry-run completed. Re-run without -WhatIf to execute these actions." "SUCCESS"
+}
+
+# VHD optimization using Optimize-VHD
 function Optimize-VHDNative {
     param([string]$VHDPath)
 
@@ -279,13 +399,7 @@ function Optimize-VHDDiskpart {
         Write-Log "Compressing VHD using diskpart: $VHDPath"
 
         # Create diskpart command file
-        $diskpartScript = @"
-select vdisk file="$VHDPath"
-attach vdisk readonly
-compact vdisk
-detach vdisk
-exit
-"@
+        $diskpartScript = Get-DiskpartCompactionScript -VHDPath $VHDPath
 
         $scriptPath = [System.IO.Path]::GetTempFileName()
         Set-Content -Path $scriptPath -Value $diskpartScript -Encoding ASCII
@@ -320,15 +434,18 @@ exit
 # Main process
 function Main {
     Write-Log "Starting WSL2 Disk Volume Optimizer"
+    if ($WhatIf) {
+        Write-Log "Preview mode: destructive operations are disabled" "WARN"
+    }
 
     # Administrator privilege check
-    if (-not (Test-Administrator)) {
+    if (-not $WhatIf -and -not (Test-Administrator)) {
         Write-Log "This script must be run with administrator privileges" "ERROR"
         exit 1
     }
 
     # Warning display
-    if (-not $Force) {
+    if (-not $Force -and -not $WhatIf) {
         Write-Host ""
         Write-Host "WARNING: IMPORTANT NOTICE" -ForegroundColor Yellow
         Write-Host "This tool will compress WSL2 VHD files."
@@ -350,28 +467,22 @@ function Main {
         exit 1
     }
 
-    # Optional Docker cleanup before WSL shutdown
-    if ($DockerPrune) {
-        if (-not (Invoke-WSLDockerSystemPrune -Distro $DockerPruneDistro)) {
-            exit 1
-        }
-    }
-
-    # Shutdown WSL
-    Write-Log "Shutting down WSL..."
-    try {
-        wsl --shutdown
-        Start-Sleep -Seconds 3
-        Write-Log "WSL shutdown completed" "SUCCESS"
-    }
-    catch {
-        Write-Log "Failed to shutdown WSL: $($_.Exception.Message)" "ERROR"
-        exit 1
-    }
-
-    # Search for VHD files
+    # Search for VHD files before any destructive action
     Write-Log "Searching for WSL VHD files..."
     $vhdFiles = Find-WSLVHDFiles -ExplicitPaths $VHDPath
+
+    if ($WhatIf) {
+        Show-DryRunPlan -VHDFiles $vhdFiles -IncludeDockerPrune:$DockerPrune -DockerDistro $DockerPruneDistro
+        if ($vhdFiles.Count -eq 0 -and $script:LastVHDSearchLocations.Count -gt 0) {
+            Write-Log "Searched locations:"
+            $script:LastVHDSearchLocations | ForEach-Object {
+                Write-Log "  - $_"
+            }
+            Write-Log "Run 'wsl --list --verbose' to confirm installed WSL2 distributions."
+            Write-Log "If your VHDX is stored in a custom location, rerun with -VHDPath <path-to-ext4.vhdx>."
+        }
+        exit 0
+    }
 
     if ($vhdFiles.Count -eq 0) {
         Write-Log "No VHD files found" "ERROR"
@@ -393,6 +504,25 @@ function Main {
             $distributionText = ", Distribution: $($_.Distribution)"
         }
         Write-Log "  - $($_.Path) (Size: $($_.SizeGB) GB, Last Modified: $($_.LastModified), Source: $($_.Source)$distributionText)"
+    }
+
+    # Optional Docker cleanup before WSL shutdown
+    if ($DockerPrune) {
+        if (-not (Invoke-WSLDockerSystemPrune -Distro $DockerPruneDistro)) {
+            exit 1
+        }
+    }
+
+    # Shutdown WSL
+    Write-Log "Shutting down WSL..."
+    try {
+        wsl --shutdown
+        Start-Sleep -Seconds 3
+        Write-Log "WSL shutdown completed" "SUCCESS"
+    }
+    catch {
+        Write-Log "Failed to shutdown WSL: $($_.Exception.Message)" "ERROR"
+        exit 1
     }
 
     # Optimize each VHD file

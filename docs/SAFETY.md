@@ -105,6 +105,23 @@ After testing, remove the disposable distribution:
 wsl --unregister TestUbuntu
 ```
 
+### Dry-run Preview
+
+Before running the actual optimizer, use dry-run mode to review detected VHDX files and planned commands without making changes:
+
+```powershell
+.\Optimize-WSL2Disk.ps1 -WhatIf
+```
+
+Dry-run mode:
+
+- Lists detected VHDX paths, sizes, and sources.
+- Shows planned `docker system prune`, `wsl --shutdown`, and compaction commands.
+- Prints safety warnings and an estimated risk level.
+- Does not call `wsl --shutdown`, `Optimize-VHD`, `diskpart`, or `docker system prune`.
+
+Use `-DryRun` as an alias for `-WhatIf`. Dry-run mode does not require administrator privileges because it only reports detection results and planned actions.
+
 ## Reporting Safety Issues
 
 If you find behavior that could unexpectedly delete data, compact the wrong file, bypass confirmation, or damage a distribution, please report it through the repository's security process. See [SECURITY.md](../SECURITY.md).
