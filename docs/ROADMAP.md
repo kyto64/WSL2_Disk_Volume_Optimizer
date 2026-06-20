@@ -14,7 +14,7 @@ Add GitHub Actions for static validation. Initial checks should include PowerShe
 
 ### Tests
 
-Add Pester tests for path detection, administrator checks, fallback selection, and logging behavior. The first test suite should avoid touching real VHDX files.
+Add Pester tests for administrator checks, fallback selection, and logging behavior. Path detection tests now cover mocked standard WSL, Docker Desktop, registry, and custom/unsupported inputs.
 
 ### Better Docker Desktop Detection
 
@@ -47,6 +47,10 @@ Add structured output for automation, including detected files, before/after siz
 ### Dry-run Mode
 
 Added `-WhatIf` and `-DryRun` preview mode that lists detected VHDX files, planned commands, safety warnings, and estimated risk without shutting down WSL or compacting anything.
+
+### Path Detection Tests
+
+Added Pester tests with mocked filesystem and registry inputs for standard WSL package paths, Docker Desktop paths, registry-backed distributions, and custom or unsupported explicit paths.
 
 ### Custom VHDX Path Support
 

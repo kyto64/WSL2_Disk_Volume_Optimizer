@@ -15,8 +15,8 @@ Recommended environment:
 Install optional PowerShell tooling:
 
 ```powershell
+Install-Module Pester -MinimumVersion 5.0.0 -Scope CurrentUser
 Install-Module PSScriptAnalyzer -Scope CurrentUser
-Install-Module Pester -Scope CurrentUser
 ```
 
 ## Local Validation
@@ -32,6 +32,14 @@ Check PowerShell syntax:
 ```powershell
 $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content .\Optimize-WSL2Disk.ps1 -Raw), [ref]$null)
 ```
+
+Run Pester tests for VHDX path detection:
+
+```powershell
+Invoke-Pester -Path .\tests\Find-WSLVHDFiles.Tests.ps1
+```
+
+The path detection tests use mocked filesystem and registry inputs, so they do not require real VHDX files or WSL shutdown.
 
 ## Safe Testing
 

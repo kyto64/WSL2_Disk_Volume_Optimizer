@@ -131,7 +131,12 @@ $script:LastVHDSearchLocations = @()
 
 # Search for VHD files
 function Find-WSLVHDFiles {
-    param([string[]]$ExplicitPaths)
+    param(
+        [string[]]$ExplicitPaths,
+        [string[]]$SearchPaths,
+        [switch]$SkipRegistrySearch,
+        [string]$RegistryRoot = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss"
+    )
 
     $vhdFiles = New-Object System.Collections.ArrayList
     $seenPaths = @{}
@@ -222,11 +227,10 @@ function Find-WSLVHDFiles {
         }
     }
 
-    $lxssRoot = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss"
-    if (Test-Path $lxssRoot) {
-        Add-SearchLocation -Path $lxssRoot -Source "WSL registry"
+    if (-not $SkipRegistrySearch -and (Test-Path $RegistryRoot)) {
+        Add-SearchLocation -Path $RegistryRoot -Source "WSL registry"
         Write-Log "Searching registered WSL distributions from registry..."
-        $distributions = Get-ChildItem -Path $lxssRoot -ErrorAction SilentlyContinue
+        $distributions = Get-ChildItem -Path $RegistryRoot -ErrorAction SilentlyContinue
         foreach ($distribution in $distributions) {
             try {
                 $properties = Get-ItemProperty -Path $distribution.PSPath -ErrorAction Stop
@@ -254,13 +258,15 @@ function Find-WSLVHDFiles {
         }
     }
 
-    $searchPaths = @(
-        "$env:LOCALAPPDATA\wsl",
-        "$env:LOCALAPPDATA\Packages",
-        "$env:LOCALAPPDATA\Docker"
-    )
+    if ($null -eq $SearchPaths) {
+        $SearchPaths = @(
+            "$env:LOCALAPPDATA\wsl",
+            "$env:LOCALAPPDATA\Packages",
+            "$env:LOCALAPPDATA\Docker"
+        )
+    }
 
-    foreach ($searchPath in $searchPaths) {
+    foreach ($searchPath in $SearchPaths) {
         Add-VHDFilesFromDirectory -Path $searchPath -Source "Standard path"
     }
 
@@ -564,11 +570,13 @@ function Main {
     }
 }
 
-# Execute script
-try {
-    Main
-}
-catch {
-    Write-Log "An unexpected error occurred: $($_.Exception.Message)" "ERROR"
-    exit 1
+# Execute script when run directly, not when dot-sourced for tests.
+if ($MyInvocation.InvocationName -ne '.' -and (Split-Path -Leaf $MyInvocation.InvocationName) -eq (Split-Path -Leaf $PSCommandPath)) {
+    try {
+        Main
+    }
+    catch {
+        Write-Log "An unexpected error occurred: $($_.Exception.Message)" "ERROR"
+        exit 1
+    }
 }
